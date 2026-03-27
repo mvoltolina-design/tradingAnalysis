@@ -1,0 +1,7 @@
+streamlit
+yfinance
+pandas
+pandas_ta
+torch
+numpy
+pyarrow
