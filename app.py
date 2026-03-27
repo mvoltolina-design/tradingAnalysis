@@ -6,13 +6,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import os
-from datetime import datetime
 
-# --- 1. CONFIGURAZIONE E ARCHITETTURA ---
-st.set_page_config(page_title="V8 Trading AI", layout="centered")
-
+# --- 1. ARCHITETTURA SPECIFICA PER EPOCH 11 (10 LAYERS) ---
 class IrisTransformer(nn.Module):
-    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
+    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=10, dropout=0.2):
         super().__init__()
         self.embedding = nn.Linear(input_dim, d_model)
         self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
@@ -32,7 +29,7 @@ class IrisTransformer(nn.Module):
         x = self.transformer(x)
         return self.fc_out(x[:, -1, :])
 
-# --- 2. FUNZIONI TECNICHE (Download & Features) ---
+# --- 2. LOGICA DI CALCOLO ---
 def clean_columns(df):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -40,19 +37,20 @@ def clean_columns(df):
     return df
 
 @st.cache_data(ttl=3600)
-def process_tickers(ticker_list):
-    all_data = []
+def fetch_and_predict(ticker_list, _model, cycles):
     vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
     vix_close = clean_columns(vix)['Close']
     
+    all_results = []
     progress_bar = st.progress(0)
+    
     for idx, symbol in enumerate(ticker_list):
         try:
             df = yf.download(symbol.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
             df = clean_columns(df)
             if len(df) < 250: continue
             
-            # Feature Engineering (Sintetizzata)
+            # Indicatori minimi necessari
             df['MA21'] = ta.sma(df['Close'], length=21)
             df['MA50'] = ta.sma(df['Close'], length=50)
             df['MA200'] = ta.sma(df['Close'], length=200)
@@ -71,65 +69,87 @@ def process_tickers(ticker_list):
             df['Recent_Div'] = 0.0
             df = df.join(vix_close.rename("VIX_Index"), how='left').ffill()
             
-            df_clean = df.dropna().tail(10).copy()
-            df_clean['Lookback_Day'] = np.arange(1, 11)
-            df_clean['Ticker'] = symbol
+            # Preparazione Tensor
+            df_input = df.dropna().tail(10)
+            cols = ['T_close','T_open','T_min','T_max','Ratio_MA21','Ratio_MA50','Ratio_MA200',
+                    'RSI','MACD','MACD_Signal','MACD_Hist','Vol_Ratio','Is_Quarter_End','Recent_Div','VIX_Index']
+            # Aggiungiamo 'Lookback_Day' per arrivare a 16 feature come richiesto dal modello
+            features = df_input[cols].values
+            lookback_days = np.arange(1, 11).reshape(-1, 1)
+            final_features = np.hstack([lookback_days, features]) 
             
-            cols = ['Ticker', 'Lookback_Day','T_close','T_open','T_min','T_max',
-                    'Ratio_MA21','Ratio_MA50','Ratio_MA200','RSI','MACD',
-                    'MACD_Signal','MACD_Hist','Vol_Ratio','Is_Quarter_End','Recent_Div','VIX_Index']
-            all_data.append(df_clean[cols])
+            input_tensor = torch.tensor(final_features, dtype=torch.float32).unsqueeze(0)
+            
+            # Monte Carlo
+            mc_preds = []
+            for _ in range(cycles):
+                mc_preds.append(_model(input_tensor).detach().numpy())
+            
+            mc_preds = np.array(mc_preds)
+            m_max = np.mean(mc_preds[:,:,3])
+            m_min = np.mean(mc_preds[:,:,2])
+            std_max = np.std(mc_preds[:,:,3])
+            conf = 1 / (1 + std_max)
+            
+            all_results.append({
+                'Ticker': symbol, 
+                'EVI': conf * m_max, 
+                'P_MAX': m_max, 
+                'P_MIN': m_min, 
+                'CONF': conf
+            })
         except: continue
         progress_bar.progress((idx + 1) / len(ticker_list))
     
-    return pd.concat(all_data) if all_data else None
+    return pd.DataFrame(all_results)
 
-# --- 3. INTERFACCIA STREAMLIT ---
-st.title("🚀 V8 Predictor Mobile")
-model_path = "transformer_v8_epoch10_deep.pth"
+# --- 3. UI PRINCIPALE ---
+st.set_page_config(page_title="V8 Deep Predictor", layout="centered")
+st.title("🎯 V8 Analysis (Epoch 09)")
 
-if not os.path.exists(model_path):
-    st.error(f"Manca il file del modello: {model_path}")
-else:
-    # Caricamento Tickers (Assicurati di avere il CSV o usa una lista fissa)
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "AMD", "NFLX", "PYPL"] # Esempio ridotto
+model_file = "transformer_v8_epoch09.pth" # Assicurati che il nome sia corretto su GitHub
 
-    if st.button("🔄 1. Aggiorna Dati e Analizza", use_container_width=True):
-        with st.spinner("Analisi di mercato in corso..."):
-            data = process_tickers(tickers)
-            if data is not None:
-                # Task Predict
-                model = IrisTransformer()
-                model.load_state_dict(torch.load(model_path, map_location="cpu"))
-                model.train() # MC Dropout attivo
+if os.path.exists(model_file):
+    # Caricamento Modello a 4 Layer
+    @st.cache_resource
+    def load_model():
+        m = IrisTransformer(num_layers=4) # Forziamo 10 layer per Epoch 11
+        m.load_state_dict(torch.load(model_file, map_location="cpu"))
+        m.train() # Per dropout
+        return m
+
+    model = load_model()
+    
+    # Caricamento Tickers
+    if os.path.exists("tickers_SP500_2026.csv"):
+        df_t = pd.read_csv("tickers_SP500_2026.csv")
+        ticker_list = df_t['Ticker'].tolist()
+        
+        st.write(f"Pronto ad analizzare {len(ticker_list)} titoli.")
+        
+        if st.button("🚀 AVVIA ANALISI COMPLETA", use_container_width=True):
+            res = fetch_and_predict(ticker_list, model, 30)
+            
+            if not res.empty:
+                res = res.sort_values('EVI', ascending=False)
                 
-                results = []
-                for t in data['Ticker'].unique():
-                    t_data = data[data['Ticker'] == t].sort_values('Lookback_Day')
-                    feat_cols = [c for c in t_data.columns if c not in ['Ticker']]
-                    features = t_data[feat_cols].values
-                    input_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
-                    
-                    mc_preds = []
-                    with torch.no_grad():
-                        for _ in range(30):
-                            mc_preds.append(model(input_tensor).numpy())
-                    
-                    mc_preds = np.array(mc_preds)
-                    p_max = np.mean(mc_preds[:,:,3])
-                    std_max = np.std(mc_preds[:,:,3])
-                    conf = 1 / (1 + std_max)
-                    evi = conf * p_max
-                    
-                    results.append({'Ticker': t, 'EVI': evi, 'CONF': conf, 'P_MAX': p_max})
+                # Top Pick in evidenza
+                top = res.iloc[0]
+                c1, c2 = st.columns(2)
+                c1.metric("TOP TICKER", top['Ticker'])
+                c2.metric("EXPECTED MAX", f"{top['P_MAX']:.2f}%")
                 
-                res_df = pd.DataFrame(results).sort_values('EVI', ascending=False)
-                
-                # Visualizzazione Mobile
-                top = res_df.iloc[0]
-                st.metric(label=f"TOP PICK: {top['Ticker']}", value=f"{top['P_MAX']:.2f}%", delta=f"EVI: {top['EVI']:.2f}")
-                
-                st.write("### 📊 Classifica EVI")
-                st.dataframe(res_df.style.format({'EVI': '{:.2f}', 'CONF': '{:.2f}', 'P_MAX': '{:.2f}%'}), use_container_width=True)
+                st.write("### 📈 Classifica Risultati")
+                # Tabella con P_MAX e P_MIN
+                st.dataframe(
+                    res[['Ticker', 'EVI', 'P_MAX', 'P_MIN', 'CONF']].style.format({
+                        'EVI': '{:.2f}', 'P_MAX': '{:.2f}%', 'P_MIN': '{:.2f}%', 'CONF': '{:.2f}'
+                    }), 
+                    use_container_width=True
+                )
             else:
-                st.error("Errore nel download dei dati.")
+                st.error("Nessun dato prodotto. Controlla la connessione o il file tickers.")
+    else:
+        st.error("File tickers_SP500_2026.csv non trovato.")
+else:
+    st.error(f"File {model_file} non trovato nel repository.")
