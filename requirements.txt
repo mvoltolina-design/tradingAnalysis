@@ -1,7 +1,7 @@
 streamlit
 yfinance
 pandas
-pandas_ta
+pandas-ta
 torch
 numpy
 pyarrow
