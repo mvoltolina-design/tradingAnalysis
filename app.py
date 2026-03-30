@@ -7,9 +7,9 @@ import torch
 import torch.nn as nn
 import os
 
-# --- 1. ARCHITETTURA SPECIFICA PER EPOCH 11 (10 LAYERS) ---
+# --- 1. transformer ---
 class IrisTransformer(nn.Module):
-    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=10, dropout=0.2):
+    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
         super().__init__()
         self.embedding = nn.Linear(input_dim, d_model)
         self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
@@ -36,7 +36,7 @@ def clean_columns(df):
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_and_predict(ticker_list, _model, cycles):
     vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
     vix_close = clean_columns(vix)['Close']
