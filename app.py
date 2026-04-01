@@ -29,19 +29,28 @@ def update_portfolio_metrics():
 
     for idx in active_indices:
         ticker = df.at[idx, 'Ticker']
-        data = yf.download(ticker.replace('.', '-'), period="1d", progress=False)
+        # Usiamo auto_adjust=True per prezzi puliti da dividendi
+        data = yf.download(ticker.replace('.', '-'), period="1d", progress=False, auto_adjust=True)
+        
         if not data.empty:
+            # --- FIX CRUCIALE: Gestione MultiIndex ---
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            
+            # Ora 'Close' è accessibile in modo sicuro
             current_p = float(data['Close'].iloc[-1])
             
-            # Aggiorna Massimo
+            # Aggiorna Massimo Reale
             if current_p > df.at[idx, 'Max_Raggiunto']:
                 df.at[idx, 'Max_Raggiunto'] = current_p
                 df.at[idx, 'Data_Max'] = datetime.now().strftime("%d/%m %H:%M")
             
-            # Aggiorna Minimo
+            # Aggiorna Minimo Reale
             if current_p < df.at[idx, 'Min_Raggiunto']:
                 df.at[idx, 'Min_Raggiunto'] = current_p
                 df.at[idx, 'Data_Min'] = datetime.now().strftime("%d/%m %H:%M")
+        else:
+            st.warning(f"Impossibile aggiornare i dati per {ticker} al momento.")
                 
     save_portfolio(df)
     return df
