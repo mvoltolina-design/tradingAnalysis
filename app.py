@@ -4,6 +4,103 @@ import pandas as pd
 import os
 from datetime import datetime
 
+# --- 1. ARCHITETTURA SPECIFICA PER EPOCH 09 -
+class IrisTransformer(nn.Module):
+    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
+        super().__init__()
+        self.embedding = nn.Linear(input_dim, d_model)
+        self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, batch_first=True, 
+            norm_first=True, dropout=dropout
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.fc_out = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.ReLU(),
+            nn.Linear(d_model // 2, 4)
+        )
+
+    def forward(self, x):
+        x = self.embedding(x) + self.pos_embedding
+        x = self.transformer(x)
+        return self.fc_out(x[:, -1, :])
+
+# --- 2. LOGICA DI CALCOLO ---
+def clean_columns(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+@st.cache_data(ttl=3600,show_spinner=False)
+def fetch_and_predict(ticker_list, _model, cycles):
+    vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
+    vix_close = clean_columns(vix)['Close']
+    
+    all_results = []
+    progress_bar = st.progress(0)
+    
+    for idx, symbol in enumerate(ticker_list):
+        try:
+            df = yf.download(symbol.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
+            df = clean_columns(df)
+            if len(df) < 250: continue
+            
+            # Indicatori minimi necessari
+            df['MA21'] = ta.sma(df['Close'], length=21)
+            df['MA50'] = ta.sma(df['Close'], length=50)
+            df['MA200'] = ta.sma(df['Close'], length=200)
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            macd = ta.macd(df['Close'])
+            df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = macd.iloc[:,0], macd.iloc[:,1], macd.iloc[:,2]
+            df['T_open'] = df['Open'].pct_change() * 100
+            df['T_close'] = df['Close'].pct_change() * 100
+            df['T_min'] = df['Low'].pct_change() * 100
+            df['T_max'] = df['High'].pct_change() * 100
+            df['Ratio_MA21'] = (df['Close'] / df['MA21'])
+            df['Ratio_MA50'] = (df['Close'] / df['MA50'])
+            df['Ratio_MA200'] = (df['Close'] / df['MA200'])
+            df['Vol_Ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
+            df['Is_Quarter_End'] = df.index.is_quarter_end.astype(float)
+            df['Recent_Div'] = 0.0
+            df = df.join(vix_close.rename("VIX_Index"), how='left').ffill()
+            
+            # Preparazione Tensor
+            df_input = df.dropna().tail(10)
+            cols = ['T_close','T_open','T_min','T_max','Ratio_MA21','Ratio_MA50','Ratio_MA200',
+                    'RSI','MACD','MACD_Signal','MACD_Hist','Vol_Ratio','Is_Quarter_End','Recent_Div','VIX_Index']
+            # Aggiungiamo 'Lookback_Day' per arrivare a 16 feature come richiesto dal modello
+            features = df_input[cols].values
+            lookback_days = np.arange(1, 11).reshape(-1, 1)
+            final_features = np.hstack([lookback_days, features]) 
+            
+            input_tensor = torch.tensor(final_features, dtype=torch.float32).unsqueeze(0)
+            
+            # Monte Carlo
+            mc_preds = []
+            for _ in range(cycles):
+                mc_preds.append(_model(input_tensor).detach().numpy())
+            
+            mc_preds = np.array(mc_preds)
+            m_max = np.mean(mc_preds[:,:,3])
+            m_min = np.mean(mc_preds[:,:,2])
+            std_max = np.std(mc_preds[:,:,3])
+            conf = 1 / (1 + std_max)
+            
+            all_results.append({
+                'Ticker': symbol, 
+                'EVI': conf * m_max, 
+                'P_MAX': m_max, 
+                'P_MIN': m_min, 
+                'CONF': conf
+            })
+        except: continue
+        progress_bar.progress((idx + 1) / len(ticker_list))
+    
+    return pd.DataFrame(all_results)
+
+
 # --- CONFIGURAZIONE FILE PERSISTENTE ---
 PORTFOLIO_FILE = "portfolio_v8.csv"
 
