@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import os
 from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
 # --- 1. CONFIGURAZIONE E ARCHITETTURA MODELLO ---
 class IrisTransformer(nn.Module):
@@ -48,13 +49,22 @@ def clean_columns(df):
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
+def get_gsheet_connection():
+    return st.connection("gsheets", type=GSheetsConnection)
+
 def load_portfolio():
-    if os.path.exists(PORTFOLIO_FILE):
-        return pd.read_csv(PORTFOLIO_FILE)
-    return pd.DataFrame(columns=['Ticker', 'Data_Acquisto', 'Prezzo_Carico', 'Max_Raggiunto', 'Data_Max', 'Min_Raggiunto', 'Data_Min', 'Stato'])
+    conn = get_gsheet_connection()
+    try:
+        # Carica i dati dal foglio Google
+        df = conn.read(worksheet="Sheet1", ttl=0) # ttl=0 forza il refresh real-time
+        return df.dropna(how="all") # Pulisce righe vuote
+    except:
+        return pd.DataFrame(columns=['Ticker', 'Data_Acquisto', 'Prezzo_Carico', 'Max_Raggiunto', 'Data_Max', 'Min_Raggiunto', 'Data_Min', 'Stato'])
 
 def save_portfolio(df):
-    df.to_csv(PORTFOLIO_FILE, index=False)
+    conn = get_gsheet_connection()
+    # Scrive l'intero dataframe sul foglio sovrascrivendo
+    conn.update(worksheet="Sheet1", data=df)
 
 @st.cache_resource
 def load_v8_model():
