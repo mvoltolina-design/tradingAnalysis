@@ -55,8 +55,13 @@ if menu == "Aggiungi Titolo":
     st.header("🛒 Nuovo Acquisto")
     t_input = st.text_input("Ticker:").upper()
     if t_input:
-        data_yf = yf.download(t_input.replace('.', '-'), period="1d", progress=False)
+        data_yf = yf.download(t_input.replace('.', '-'), period="1d", progress=False, auto_adjust=True))
         if not data_yf.empty:
+            # Gestione sicura delle colonne (rimuove il MultiIndex se presente)
+            if isinstance(data_yf.columns, pd.MultiIndex):
+                data_yf.columns = data_yf.columns.get_level_values(0)
+            
+            # Estrazione sicura dell'ultimo prezzo di chiusura
             current_p = float(data_yf['Close'].iloc[-1])
             st.metric("Prezzo Attuale", f"${current_p:.2f}")
             
@@ -78,7 +83,7 @@ if menu == "Aggiungi Titolo":
                 save_portfolio(df)
                 st.success(f"{t_input} aggiunto al portafoglio di oggi!")
         else:
-            st.error("Ticker non trovato.")
+            st.error(f"Nessun dato trovato per il ticker {t_input}. Verifica il simbolo.")
 
 elif menu == "Dashboard Portafoglio":
     st.header("📈 Monitoraggio Titoli Attivi")
