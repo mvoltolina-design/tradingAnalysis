@@ -55,7 +55,7 @@ if menu == "Aggiungi Titolo":
     st.header("🛒 Nuovo Acquisto")
     t_input = st.text_input("Ticker:").upper()
     if t_input:
-        data_yf = yf.download(t_input.replace('.', '-'), period="1d", progress=False, auto_adjust=True))
+        data_yf = yf.download(t_input.replace('.', '-'), period="1d", progress=False, auto_adjust=True)
         if not data_yf.empty:
             # Gestione sicura delle colonne (rimuove il MultiIndex se presente)
             if isinstance(data_yf.columns, pd.MultiIndex):
