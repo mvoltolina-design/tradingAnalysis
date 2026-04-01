@@ -1,7 +1,8 @@
-streamlit
-yfinance
+streamlit>=1.30.0
+st-gsheets-connection
 pandas
-pandas-ta
-torch
 numpy
+yfinance
+torch
+pandas-ta
 pyarrow
