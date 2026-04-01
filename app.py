@@ -160,7 +160,7 @@ elif menu == "Analisi V8":
     # Caricamento Modello (Assicurati che num_layers sia 4 come abbiamo appurato)
     @st.cache_resource
     def load_v8_model():
-        model_path = "transformer_v8_epoch11.pth"
+        model_path = "transformer_v8_epoch09.pth"
         if os.path.exists(model_path):
             m = IrisTransformer(num_layers=4) # Architettura corretta a 4 layer
             m.load_state_dict(torch.load(model_path, map_location="cpu"))
