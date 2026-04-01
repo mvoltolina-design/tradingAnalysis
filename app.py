@@ -27,30 +27,41 @@ def update_portfolio_metrics():
     active_indices = df[df['Stato'] == 'OPEN'].index
     if len(active_indices) == 0: return df
 
-    for idx in active_indices:
-        ticker = df.at[idx, 'Ticker']
-        # Usiamo auto_adjust=True per prezzi puliti da dividendi
-        data = yf.download(ticker.replace('.', '-'), period="1d", progress=False, auto_adjust=True)
+    # Creiamo una lista di ticker per fare un download unico (più veloce)
+    tickers_to_update = df.loc[active_indices, 'Ticker'].unique().tolist()
+    
+    try:
+        # Download bulk di tutti i ticker attivi
+        data_bulk = yf.download([t.replace('.', '-') for t in tickers_to_update], 
+                                period="1d", progress=False, auto_adjust=True)
         
-        if not data.empty:
-            # --- FIX CRUCIALE: Gestione MultiIndex ---
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
+        for idx in active_indices:
+            ticker = df.at[idx, 'Ticker']
+            t_search = ticker.replace('.', '-')
             
-            # Ora 'Close' è accessibile in modo sicuro
-            current_p = float(data['Close'].iloc[-1])
+            # Gestione dati se MultiIndex (più ticker) o SingleIndex (un solo ticker)
+            if len(tickers_to_update) > 1:
+                current_p = float(data_bulk['Close'][t_search].iloc[-1])
+            else:
+                current_p = float(data_bulk['Close'].iloc[-1])
+
+            if np.isnan(current_p): continue
+
+            # --- LOGICA DI AGGIORNAMENTO MASSIMI E MINIMI ---
             
-            # Aggiorna Massimo Reale
+            # Aggiorna il Massimo se il prezzo attuale è il più alto mai visto dall'acquisto
             if current_p > df.at[idx, 'Max_Raggiunto']:
                 df.at[idx, 'Max_Raggiunto'] = current_p
                 df.at[idx, 'Data_Max'] = datetime.now().strftime("%d/%m %H:%M")
             
-            # Aggiorna Minimo Reale
+            # Aggiorna il Minimo se il prezzo attuale è il più basso mai visto dall'acquisto
+            # IMPORTANTE: Se è la prima volta, il min è uguale al prezzo di carico
             if current_p < df.at[idx, 'Min_Raggiunto']:
                 df.at[idx, 'Min_Raggiunto'] = current_p
                 df.at[idx, 'Data_Min'] = datetime.now().strftime("%d/%m %H:%M")
-        else:
-            st.warning(f"Impossibile aggiornare i dati per {ticker} al momento.")
+                
+    except Exception as e:
+        st.warning(f"Errore durante l'aggiornamento prezzi: {e}")
                 
     save_portfolio(df)
     return df
@@ -111,22 +122,86 @@ elif menu == "Dashboard Portafoglio":
                 for _, row in sub_df.iterrows():
                     # Calcolo percentuali basate sul prezzo d'acquisto utente
                     def perc(val): return ((val - row['Prezzo_Carico']) / row['Prezzo_Carico']) * 100
-                    
-                    c1, c2, c3 = st.columns([1, 2, 2])
+                    # Funzione interna per calcolare la percentuale rispetto al carico
+                    def calc_perc(val): 
+                        return ((val - row['Prezzo_Carico']) / row['Prezzo_Carico']) * 100
+                    # Layout a 3 colonne: Info Titolo | Massimo | Minimo
+                    c1, c2, c3 = st.columns([1.2, 2, 2])
                     with c1:
-                        st.subheader(row['Ticker'])
-                        st.caption(f"Carico: ${row['Prezzo_Carico']:.2f}")
+                        st.subheader(f" {row['Ticker']}")
+                        st.caption(f"💰 Carico: **${row['Prezzo_Carico']:.2f}**")
+                        st.caption(f"📅 Inizio: {row['Data_Acquisto']}")
                     
                     with c2:
-                        st.write(f"🚀 **Max:** {perc(row['Max_Raggiunto']):+.2f}%")
-                        st.caption(f"Raggiunto il: {row['Data_Max']}")
+                        st.markdown("##### 🚀 Massimo")
+                        diff_max = calc_perc(row['Max_Raggiunto'])
+                        # Mostriamo Valore Assoluto + Percentuale
+                        st.write(f"**${row['Max_Raggiunto']:.2f}** ({diff_max:+.2f}%)")
+                        st.caption(f"🕒 {row['Data_Max']}")
                     
                     with c3:
-                        st.write(f"⚠️ **Min:** {perc(row['Min_Raggiunto']):+.2f}%")
-                        st.caption(f"Raggiunto il: {row['Data_Min']}")
+                        st.markdown("##### ⚠️ Minimo")
+                        diff_min = calc_perc(row['Min_Raggiunto'])
+                        # Mostriamo Valore Assoluto + Percentuale
+                        st.write(f"**${row['Min_Raggiunto']:.2f}** ({diff_min:+.2f}%)")
+                        st.caption(f"🕒 {row['Data_Min']}")
                     
-                    if st.button(f"Chiudi Posizione {row['Ticker']}", key=f"close_{row['Ticker']}_{d}"):
-                        df.loc[(df['Ticker'] == row['Ticker']) & (df['Data_Acquisto'] == d), 'Stato'] = 'CLOSED'
+                    # Bottone per chiudere l'operazione
+                    if st.button(f"Chiudi {row['Ticker']}", key=f"btn_close_{row['Ticker']}_{row['Data_Acquisto']}"):
+                        df.loc[(df['Ticker'] == row['Ticker']) & (df['Data_Acquisto'] == row['Data_Acquisto']), 'Stato'] = 'CLOSED'
                         save_portfolio(df)
+                        st.success(f"Posizione su {row['Ticker']} spostata nello storico.")
                         st.rerun()
+                    
                     st.divider()
+elif menu == "Analisi V8":
+    st.header("🎯 Deep Analysis - Epoch 11")
+    
+    # Caricamento Modello (Assicurati che num_layers sia 4 come abbiamo appurato)
+    @st.cache_resource
+    def load_v8_model():
+        model_path = "transformer_v8_epoch11.pth"
+        if os.path.exists(model_path):
+            m = IrisTransformer(num_layers=4) # Architettura corretta a 4 layer
+            m.load_state_dict(torch.load(model_path, map_location="cpu"))
+            m.train() # Importante per Monte Carlo Dropout
+            return m
+        return None
+
+    model_v8 = load_v8_model()
+
+    if model_v8 is None:
+        st.error("File modello .pth non trovato nel repository!")
+    else:
+        if os.path.exists("tickers_SP500_2026.csv"):
+            df_tickers = pd.read_csv("tickers_SP500_2026.csv")
+            ticker_list = df_tickers['Ticker'].tolist()
+            
+            st.write(f"Pronto ad analizzare **{len(ticker_list)}** titoli dello S&P 500.")
+            cycles = st.slider("Cicli Monte Carlo (Precisione)", 10, 100, 30)
+
+            if st.button("🚀 AVVIA ANALISI COMPLETA", use_container_width=True):
+                # Chiamata alla funzione di predizione (senza cache per vedere la barra)
+                with st.container():
+                    results_df = fetch_and_predict(ticker_list, model_v8, cycles)
+                
+                if not results_df.empty:
+                    st.success("✅ Analisi completata con successo!")
+                    
+                    # Ordiniamo per EVI (Expected Value Index)
+                    results_df = results_df.sort_values('EVI', ascending=False)
+                    
+                    # Visualizzazione Tabella Risultati
+                    st.dataframe(
+                        results_df[['Ticker', 'EVI', 'P_MAX', 'P_MIN', 'CONF']].style.format({
+                            'EVI': '{:.2f}', 
+                            'P_MAX': '{:.2f}%', 
+                            'P_MIN': '{:.2f}%', 
+                            'CONF': '{:.2f}'
+                        }), 
+                        use_container_width=True
+                    )
+                else:
+                    st.error("L'analisi non ha prodotto risultati. Verifica i log.")
+        else:
+            st.error("File tickers_SP500_2026.csv non trovato.")
