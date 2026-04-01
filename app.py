@@ -53,18 +53,24 @@ def get_gsheet_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
 def load_portfolio():
-    conn = get_gsheet_connection()
     try:
-        # Carica i dati dal foglio Google
-        df = conn.read(worksheet="Sheet1", ttl=0) # ttl=0 forza il refresh real-time
-        return df.dropna(how="all") # Pulisce righe vuote
-    except:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        # Carica i dati ignorando la cache (ttl=0) per avere dati sempre freschi
+        df = conn.read(worksheet="Sheet1", ttl=0)
+        return df.dropna(how="all")
+    except Exception as e:
+        # Se il foglio è vuoto o non connesso, restituisce lo schema base
         return pd.DataFrame(columns=['Ticker', 'Data_Acquisto', 'Prezzo_Carico', 'Max_Raggiunto', 'Data_Max', 'Min_Raggiunto', 'Data_Min', 'Stato'])
 
 def save_portfolio(df):
-    conn = get_gsheet_connection()
-    # Scrive l'intero dataframe sul foglio sovrascrivendo
-    conn.update(worksheet="Sheet1", data=df)
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        # Sovrascrive il foglio con il nuovo DataFrame
+        conn.update(worksheet="Sheet1", data=df)
+        # Piccolo trucco: svuota la cache di lettura per riflettere subito le modifiche
+        st.cache_data.clear() 
+    except Exception as e:
+        st.error(f"Errore nel salvataggio su Google Sheets: {e}")
 
 @st.cache_resource
 def load_v8_model():
