@@ -1,77 +1,118 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import os
+from datetime import datetime
 
-# --- INIZIALIZZAZIONE PORTAFOGLIO ---
-if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = {} # Formato: { 'AAPL': {'entry_price': 150.0, 'max_seen': 150.0, 'min_seen': 150.0} }
+# --- CONFIGURAZIONE FILE PERSISTENTE ---
+PORTFOLIO_FILE = "portfolio_v8.csv"
 
-# --- FUNZIONI DI SUPPORTO ---
-def get_live_price(ticker):
-    try:
-        data = yf.download(ticker.replace('.', '-'), period="1d", progress=False)
-        return float(data['Close'].iloc[-1])
-    except:
-        return None
-
-# --- UI ---
-st.title("🚀 V8 Portfolio & Analysis")
-
-tab1, tab2, tab3 = st.tabs(["🔍 Analisi", "📈 Portafoglio", "⚙️ Dettaglio Ticker"])
-
-# --- TAB 1: ANALISI (Il tuo codice precedente va qui) ---
-with tab1:
-    st.info("Esegui l'analisi V8 per trovare nuove opportunità.")
-    # (Inserisci qui il pulsante "AVVIA ANALISI COMPLETA" già sviluppato)
-
-# --- TAB 2: PORTAFOGLIO ---
-with tab2:
-    st.header("I Tuoi Titoli")
-    if not st.session_state.portfolio:
-        st.write("Il portafoglio è vuoto.")
+def load_portfolio():
+    if os.path.exists(PORTFOLIO_FILE):
+        return pd.read_csv(PORTFOLIO_FILE)
     else:
-        for t, info in list(st.session_state.portfolio.items()):
-            current_p = get_live_price(t)
-            if current_p:
-                # Aggiornamento massimi e minimi reali raggiunti
-                if current_p > info['max_seen']: st.session_state.portfolio[t]['max_seen'] = current_p
-                if current_p < info['min_seen']: st.session_state.portfolio[t]['min_seen'] = current_p
-                
-                perf_reale = ((current_p - info['entry_price']) / info['entry_price']) * 100
-                max_reale = ((info['max_seen'] - info['entry_price']) / info['entry_price']) * 100
-                min_reale = ((info['min_seen'] - info['entry_price']) / info['entry_price']) * 100
-                
-                with st.expander(f"{t} | {perf_reale:.2f}%"):
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Prezzo Attuale", f"{current_p:.2f}")
-                    c2.metric("Max Raggiunto", f"{max_reale:.2f}%", delta_color="normal")
-                    c3.metric("Min Raggiunto", f"{min_reale:.2f}%", delta_color="inverse")
-                    
-                    if st.button(f"Rimuovi {t}", key=f"del_{t}"):
-                        del st.session_state.portfolio[t]
-                        st.rerun()
+        return pd.DataFrame(columns=[
+            'Ticker', 'Data_Acquisto', 'Prezzo_Carico', 
+            'Max_Raggiunto', 'Data_Max', 'Min_Raggiunto', 'Data_Min', 'Stato'
+        ])
 
-# --- TAB 3: DETTAGLIO & ACQUISTO ---
-with tab3:
-    st.header("Gestione Titolo")
-    ticker_to_search = st.text_input("Inserisci Ticker (es. NVDA):").upper()
+def save_portfolio(df):
+    df.to_csv(PORTFOLIO_FILE, index=False)
+
+# --- FUNZIONE DI AGGIORNAMENTO PREZZI ---
+def update_portfolio_metrics():
+    df = load_portfolio()
+    if df.empty: return df
     
-    if ticker_to_search:
-        current_price = get_live_price(ticker_to_search)
-        
-        if current_price:
-            st.metric(f"Prezzo attuale di {ticker_to_search}", f"${current_price:.2f}")
+    active_indices = df[df['Stato'] == 'OPEN'].index
+    if len(active_indices) == 0: return df
+
+    for idx in active_indices:
+        ticker = df.at[idx, 'Ticker']
+        data = yf.download(ticker.replace('.', '-'), period="1d", progress=False)
+        if not data.empty:
+            current_p = float(data['Close'].iloc[-1])
             
-            entry_input = st.number_input("Prezzo di acquisto:", value=current_price)
+            # Aggiorna Massimo
+            if current_p > df.at[idx, 'Max_Raggiunto']:
+                df.at[idx, 'Max_Raggiunto'] = current_p
+                df.at[idx, 'Data_Max'] = datetime.now().strftime("%d/%m %H:%M")
             
-            if st.button(f"Aggiungi {ticker_to_search} al Portafoglio"):
-                st.session_state.portfolio[ticker_to_search] = {
-                    'entry_price': entry_input,
-                    'max_seen': current_price,
-                    'min_seen': current_price
+            # Aggiorna Minimo
+            if current_p < df.at[idx, 'Min_Raggiunto']:
+                df.at[idx, 'Min_Raggiunto'] = current_p
+                df.at[idx, 'Data_Min'] = datetime.now().strftime("%d/%m %H:%M")
+                
+    save_portfolio(df)
+    return df
+
+# --- INTERFACCIA ---
+st.title("📂 V8 Multi-Day Portfolio Tracker")
+
+menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
+
+if menu == "Aggiungi Titolo":
+    st.header("🛒 Nuovo Acquisto")
+    t_input = st.text_input("Ticker:").upper()
+    if t_input:
+        data_yf = yf.download(t_input.replace('.', '-'), period="1d", progress=False)
+        if not data_yf.empty:
+            current_p = float(data_yf['Close'].iloc[-1])
+            st.metric("Prezzo Attuale", f"${current_p:.2f}")
+            
+            entry_p = st.number_input("Conferma Prezzo d'Acquisto:", value=current_p)
+            
+            if st.button("Inserisci in Portafoglio"):
+                df = load_portfolio()
+                new_row = {
+                    'Ticker': t_input,
+                    'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
+                    'Prezzo_Carico': entry_p,
+                    'Max_Raggiunto': current_p,
+                    'Data_Max': datetime.now().strftime("%d/%m %H:%M"),
+                    'Min_Raggiunto': current_p,
+                    'Data_Min': datetime.now().strftime("%d/%m %H:%M"),
+                    'Stato': 'OPEN'
                 }
-                st.success(f"{ticker_to_search} aggiunto con successo!")
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                save_portfolio(df)
+                st.success(f"{t_input} aggiunto al portafoglio di oggi!")
         else:
-            st.error("Impossibile recuperare il prezzo. Verifica il ticker.")
+            st.error("Ticker non trovato.")
+
+elif menu == "Dashboard Portafoglio":
+    st.header("📈 Monitoraggio Titoli Attivi")
+    df = update_portfolio_metrics()
+    
+    if df.empty:
+        st.info("Nessun titolo in portafoglio.")
+    else:
+        # Raggruppiamo per data di acquisto
+        date_groups = df[df['Stato'] == 'OPEN']['Data_Acquisto'].unique()
+        
+        for d in sorted(date_groups, reverse=True):
+            with st.expander(f"📅 Portfolio del {d}", expanded=True):
+                sub_df = df[(df['Data_Acquisto'] == d) & (df['Stato'] == 'OPEN')]
+                
+                for _, row in sub_df.iterrows():
+                    # Calcolo percentuali basate sul prezzo d'acquisto utente
+                    def perc(val): return ((val - row['Prezzo_Carico']) / row['Prezzo_Carico']) * 100
+                    
+                    c1, c2, c3 = st.columns([1, 2, 2])
+                    with c1:
+                        st.subheader(row['Ticker'])
+                        st.caption(f"Carico: ${row['Prezzo_Carico']:.2f}")
+                    
+                    with c2:
+                        st.write(f"🚀 **Max:** {perc(row['Max_Raggiunto']):+.2f}%")
+                        st.caption(f"Raggiunto il: {row['Data_Max']}")
+                    
+                    with c3:
+                        st.write(f"⚠️ **Min:** {perc(row['Min_Raggiunto']):+.2f}%")
+                        st.caption(f"Raggiunto il: {row['Data_Min']}")
+                    
+                    if st.button(f"Chiudi Posizione {row['Ticker']}", key=f"close_{row['Ticker']}_{d}"):
+                        df.loc[(df['Ticker'] == row['Ticker']) & (df['Data_Acquisto'] == d), 'Stato'] = 'CLOSED'
+                        save_portfolio(df)
+                        st.rerun()
+                    st.divider()
