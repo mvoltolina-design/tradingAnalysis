@@ -1,155 +1,77 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
-import torch
-import torch.nn as nn
 import os
 
-# --- 1. transformer ---
-class IrisTransformer(nn.Module):
-    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
-        super().__init__()
-        self.embedding = nn.Linear(input_dim, d_model)
-        self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, batch_first=True, 
-            norm_first=True, dropout=dropout
-        )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.fc_out = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            nn.ReLU(),
-            nn.Linear(d_model // 2, 4)
-        )
+# --- INIZIALIZZAZIONE PORTAFOGLIO ---
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = {} # Formato: { 'AAPL': {'entry_price': 150.0, 'max_seen': 150.0, 'min_seen': 150.0} }
 
-    def forward(self, x):
-        x = self.embedding(x) + self.pos_embedding
-        x = self.transformer(x)
-        return self.fc_out(x[:, -1, :])
+# --- FUNZIONI DI SUPPORTO ---
+def get_live_price(ticker):
+    try:
+        data = yf.download(ticker.replace('.', '-'), period="1d", progress=False)
+        return float(data['Close'].iloc[-1])
+    except:
+        return None
 
-# --- 2. LOGICA DI CALCOLO ---
-def clean_columns(df):
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+# --- UI ---
+st.title("🚀 V8 Portfolio & Analysis")
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_and_predict(ticker_list, _model, cycles):
-    vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
-    vix_close = clean_columns(vix)['Close']
-    
-    all_results = []
-    progress_bar = st.progress(0)
-    
-    for idx, symbol in enumerate(ticker_list):
-        try:
-            df = yf.download(symbol.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
-            df = clean_columns(df)
-            if len(df) < 250: continue
-            
-            # Indicatori minimi necessari
-            df['MA21'] = ta.sma(df['Close'], length=21)
-            df['MA50'] = ta.sma(df['Close'], length=50)
-            df['MA200'] = ta.sma(df['Close'], length=200)
-            df['RSI'] = ta.rsi(df['Close'], length=14)
-            macd = ta.macd(df['Close'])
-            df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = macd.iloc[:,0], macd.iloc[:,1], macd.iloc[:,2]
-            df['T_open'] = df['Open'].pct_change() * 100
-            df['T_close'] = df['Close'].pct_change() * 100
-            df['T_min'] = df['Low'].pct_change() * 100
-            df['T_max'] = df['High'].pct_change() * 100
-            df['Ratio_MA21'] = (df['Close'] / df['MA21'])
-            df['Ratio_MA50'] = (df['Close'] / df['MA50'])
-            df['Ratio_MA200'] = (df['Close'] / df['MA200'])
-            df['Vol_Ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
-            df['Is_Quarter_End'] = df.index.is_quarter_end.astype(float)
-            df['Recent_Div'] = 0.0
-            df = df.join(vix_close.rename("VIX_Index"), how='left').ffill()
-            
-            # Preparazione Tensor
-            df_input = df.dropna().tail(10)
-            cols = ['T_close','T_open','T_min','T_max','Ratio_MA21','Ratio_MA50','Ratio_MA200',
-                    'RSI','MACD','MACD_Signal','MACD_Hist','Vol_Ratio','Is_Quarter_End','Recent_Div','VIX_Index']
-            # Aggiungiamo 'Lookback_Day' per arrivare a 16 feature come richiesto dal modello
-            features = df_input[cols].values
-            lookback_days = np.arange(1, 11).reshape(-1, 1)
-            final_features = np.hstack([lookback_days, features]) 
-            
-            input_tensor = torch.tensor(final_features, dtype=torch.float32).unsqueeze(0)
-            
-            # Monte Carlo
-            mc_preds = []
-            for _ in range(cycles):
-                mc_preds.append(_model(input_tensor).detach().numpy())
-            
-            mc_preds = np.array(mc_preds)
-            m_max = np.mean(mc_preds[:,:,3])
-            m_min = np.mean(mc_preds[:,:,2])
-            std_max = np.std(mc_preds[:,:,3])
-            conf = 1 / (1 + std_max)
-            
-            all_results.append({
-                'Ticker': symbol, 
-                'EVI': conf * m_max, 
-                'P_MAX': m_max, 
-                'P_MIN': m_min, 
-                'CONF': conf
-            })
-        except: continue
-        progress_bar.progress((idx + 1) / len(ticker_list))
-    
-    return pd.DataFrame(all_results)
+tab1, tab2, tab3 = st.tabs(["🔍 Analisi", "📈 Portafoglio", "⚙️ Dettaglio Ticker"])
 
-# --- 3. UI PRINCIPALE ---
-st.set_page_config(page_title="V8 Deep Predictor", layout="centered")
-st.title("🎯 V8 Analysis (Epoch 09)")
+# --- TAB 1: ANALISI (Il tuo codice precedente va qui) ---
+with tab1:
+    st.info("Esegui l'analisi V8 per trovare nuove opportunità.")
+    # (Inserisci qui il pulsante "AVVIA ANALISI COMPLETA" già sviluppato)
 
-model_file = "transformer_v8_epoch09.pth" # Assicurati che il nome sia corretto su GitHub
-
-if os.path.exists(model_file):
-    # Caricamento Modello a 4 Layer
-    @st.cache_resource
-    def load_model():
-        m = IrisTransformer(num_layers=4) # Forziamo 10 layer per Epoch 11
-        m.load_state_dict(torch.load(model_file, map_location="cpu"))
-        m.train() # Per dropout
-        return m
-
-    model = load_model()
-    
-    # Caricamento Tickers
-    if os.path.exists("tickers_SP500_2026.csv"):
-        df_t = pd.read_csv("tickers_SP500_2026.csv")
-        ticker_list = df_t['Ticker'].tolist()
-        
-        st.write(f"Pronto ad analizzare {len(ticker_list)} titoli.")
-        
-        if st.button("🚀 AVVIA ANALISI COMPLETA", use_container_width=True):
-            res = fetch_and_predict(ticker_list, model, 30)
-            
-            if not res.empty:
-                res = res.sort_values('EVI', ascending=False)
-                
-                # Top Pick in evidenza
-                top = res.iloc[0]
-                c1, c2 = st.columns(2)
-                c1.metric("TOP TICKER", top['Ticker'])
-                c2.metric("EXPECTED MAX", f"{top['P_MAX']:.2f}%")
-                
-                st.write("### 📈 Classifica Risultati")
-                # Tabella con P_MAX e P_MIN
-                st.dataframe(
-                    res[['Ticker', 'EVI', 'P_MAX', 'P_MIN', 'CONF']].style.format({
-                        'EVI': '{:.2f}', 'P_MAX': '{:.2f}%', 'P_MIN': '{:.2f}%', 'CONF': '{:.2f}'
-                    }), 
-                    use_container_width=True
-                )
-            else:
-                st.error("Nessun dato prodotto. Controlla la connessione o il file tickers.")
+# --- TAB 2: PORTAFOGLIO ---
+with tab2:
+    st.header("I Tuoi Titoli")
+    if not st.session_state.portfolio:
+        st.write("Il portafoglio è vuoto.")
     else:
-        st.error("File tickers_SP500_2026.csv non trovato.")
-else:
-    st.error(f"File {model_file} non trovato nel repository.")
+        for t, info in list(st.session_state.portfolio.items()):
+            current_p = get_live_price(t)
+            if current_p:
+                # Aggiornamento massimi e minimi reali raggiunti
+                if current_p > info['max_seen']: st.session_state.portfolio[t]['max_seen'] = current_p
+                if current_p < info['min_seen']: st.session_state.portfolio[t]['min_seen'] = current_p
+                
+                perf_reale = ((current_p - info['entry_price']) / info['entry_price']) * 100
+                max_reale = ((info['max_seen'] - info['entry_price']) / info['entry_price']) * 100
+                min_reale = ((info['min_seen'] - info['entry_price']) / info['entry_price']) * 100
+                
+                with st.expander(f"{t} | {perf_reale:.2f}%"):
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Prezzo Attuale", f"{current_p:.2f}")
+                    c2.metric("Max Raggiunto", f"{max_reale:.2f}%", delta_color="normal")
+                    c3.metric("Min Raggiunto", f"{min_reale:.2f}%", delta_color="inverse")
+                    
+                    if st.button(f"Rimuovi {t}", key=f"del_{t}"):
+                        del st.session_state.portfolio[t]
+                        st.rerun()
+
+# --- TAB 3: DETTAGLIO & ACQUISTO ---
+with tab3:
+    st.header("Gestione Titolo")
+    ticker_to_search = st.text_input("Inserisci Ticker (es. NVDA):").upper()
+    
+    if ticker_to_search:
+        current_price = get_live_price(ticker_to_search)
+        
+        if current_price:
+            st.metric(f"Prezzo attuale di {ticker_to_search}", f"${current_price:.2f}")
+            
+            entry_input = st.number_input("Prezzo di acquisto:", value=current_price)
+            
+            if st.button(f"Aggiungi {ticker_to_search} al Portafoglio"):
+                st.session_state.portfolio[ticker_to_search] = {
+                    'entry_price': entry_input,
+                    'max_seen': current_price,
+                    'min_seen': current_price
+                }
+                st.success(f"{ticker_to_search} aggiunto con successo!")
+        else:
+            st.error("Impossibile recuperare il prezzo. Verifica il ticker.")
