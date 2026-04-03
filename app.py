@@ -86,7 +86,7 @@ def save_portfolio(df):
     conn = st.connection("gsheets", type=GSheetsConnection)
     # Assicurati di salvare nell'ordine esatto
     df_to_save = df[COLONNE_PORTAFOGLIO]
-    conn.update(spreadsheet=SQL_URL, worksheet="Sheet1", data=df_to_save)
+    conn.update(worksheet="Sheet1", data=df_to_save)
     st.cache_data.clear()
 
 @st.cache_resource
