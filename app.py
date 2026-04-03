@@ -216,16 +216,13 @@ menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo",
 if menu == "Dashboard Portafoglio":
     st.header("📈 Portafoglio Attivo")
     
-    # 1. Esegue l'aggiornamento (scarica i dati da yfinance dal giorno d'acquisto)
-    with st.spinner("Sincronizzazione dati storici con Google Sheets..."):
+    with st.spinner("Aggiornamento dati da Yahoo Finance..."):
         df_p = update_portfolio_metrics()
     
     if df_p.empty or df_p[df_p['Stato'] == 'OPEN'].empty:
-        st.info("Nessun titolo attivo in portafoglio.")
+        st.info("Nessun titolo attivo.")
     else:
-        # Ordiniamo per data di acquisto (più recenti in alto)
-        # Assicuriamoci che Data_Acquisto sia trattata come stringa per il raggruppamento
-        df_p['Data_Acquisto'] = df_p['Data_Acquisto'].astype(str)
+        # Raggruppamento per data
         dates = sorted(df_p[df_p['Stato'] == 'OPEN']['Data_Acquisto'].unique(), reverse=True)
 
         for d in dates:
@@ -233,42 +230,53 @@ if menu == "Dashboard Portafoglio":
                 sub = df_p[(df_p['Data_Acquisto'] == d) & (df_p['Stato'] == 'OPEN')]
                 
                 for i, row in sub.iterrows():
+                    # --- RIGA 1: Info Titolo e Performance Reale ---
                     c1, c2, c3 = st.columns([1.2, 2, 2])
                     
-                    # --- COLONNA 1: INFO TITOLO ---
                     with c1:
                         st.subheader(row['Ticker'])
-                        st.caption(f"Carico: ${float(row['Prezzo_Carico']):.2f}")
+                        st.caption(f"Carico: **${float(row['Prezzo_Carico']):.2f}**")
+                        # Visualizziamo la Confidence come un piccolo badge
+                        conf_color = "orange" if row['Confidence'] == "Media" else "green"
+                        st.markdown(f"**Conf:** :{conf_color}[{row['Confidence']}]")
                     
-                    # --- COLONNA 2: MASSIMO STORICO ---
                     with c2:
-                        # Usiamo i valori già calcolati da update_portfolio_metrics
-                        max_val = float(row['Max_Raggiunto'])
-                        # Moltiplichiamo per 100 se nel foglio sono decimali (es. 0.08 -> 8%)
-                        max_perc = float(row['Max_Raggiunto%']) * 100
-                        
-                        st.write(f"🚀 **Max: ${max_val:.2f}**")
-                        st.write(f"({max_perc:+.2f}%)")
-                        st.caption(f"🕒 {row['Data_Max']}")
+                        max_r = float(row['Max_Raggiunto'])
+                        max_p = float(row['Max_Raggiunto%']) * 100
+                        st.write(f"🚀 **Max Reale: ${max_r:.2f}**")
+                        st.caption(f"({max_p:+.2f}%) il {row['Data_Max']}")
                     
-                    # --- COLONNA 3: MINIMO STORICO ---
                     with c3:
-                        min_val = float(row['Min_Raggiunto'])
-                        min_perc = float(row['Min_Raggiunto%']) * 100
-                        
-                        st.write(f"⚠️ **Min: ${min_val:.2f}**")
-                        st.write(f"({min_perc:+.2f}%)")
-                        st.caption(f"🕒 {row['Data_Min']}")
+                        min_r = float(row['Min_Raggiunto'])
+                        min_p = float(row['Min_Raggiunto%']) * 100
+                        st.write(f"⚠️ **Min Reale: ${min_r:.2f}**")
+                        st.caption(f"({min_p:+.2f}%) il {row['Data_Min']}")
+
+                    # --- RIGA 2: Target di Analisi (Est_Max / Est_Min) ---
+                    # Usiamo uno sfondo leggermente diverso o testo in corsivo per distinguere le stime
+                    st.markdown("---")
+                    st.caption("🎯 **Target di Analisi V8 (Previsioni)**")
+                    ca, cb, cc = st.columns([1.2, 2, 2])
                     
+                    with cb:
+                        e_max = float(row['Est_Max'])
+                        diff_max = ((e_max - max_r) / max_r) * 100 if max_r != 0 else 0
+                        st.write(f"📈 Est. Max: **${e_max:.2f}**")
+                        st.caption(f"Distanza dal picco: {diff_max:+.2f}%")
+
+                    with cc:
+                        e_min = float(row['Est_Min'])
+                        diff_min = ((min_r - e_min) / e_min) * 100 if e_min != 0 else 0
+                        st.write(f"📉 Est. Min: **${e_min:.2f}**")
+                        st.caption(f"Protezione stimata: {diff_min:+.2f}%")
+
                     # --- AZIONI ---
-                    if st.button(f"Chiudi Posizione {row['Ticker']}", key=f"cl_{i}"):
+                    if st.button(f"Chiudi Posizione {row['Ticker']}", key=f"close_{i}"):
                         df_p.at[i, 'Stato'] = 'CLOSED'
                         save_portfolio(df_p)
-                        st.success(f"Posizione su {row['Ticker']} chiusa!")
                         st.rerun()
                     
                     st.divider()
-
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
     
