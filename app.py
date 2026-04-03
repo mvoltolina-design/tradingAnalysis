@@ -307,7 +307,7 @@ if menu == "Dashboard Portafoglio":
     st.header("📊 Il Tuo Portafoglio")
     
     # Caricamento dati originale
-    df_port = load_portfolio_data()
+    df_port = load_portfolio()
     
     if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
