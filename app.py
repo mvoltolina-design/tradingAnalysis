@@ -89,6 +89,12 @@ def save_portfolio(df):
     conn.update(worksheet="Sheet1", data=df_to_save)
     st.cache_data.clear()
 
+def load_analisi_data():
+    # Carica il foglio dove tieni i risultati di Analisi V8 (es. 'candidati')
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    df = conn.read(worksheet="candidati", ttl=0) # Nome del tab dell'analisi
+    return df
+
 @st.cache_resource
 def load_v8_model():
     path = "transformer_v8_epoch09.pth"
@@ -292,6 +298,8 @@ if menu == "Dashboard Portafoglio":
                     
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
+    # --- RECUPERO DATI ANALISI ---
+    df_analisi = load_analisi_data()
     
     # 1. Input del Ticker
     t_in = st.text_input("Ticker (es. AAPL, NVDA):").upper().strip()
@@ -304,7 +312,7 @@ if menu == "Aggiungi Titolo":
         # Valori di default
         default_max = 0.0
         default_min = 0.0
-        default_conf = "Media"
+        default_conf = "N/D"
         
         if not match.empty:
             st.success(f"✅ Titolo trovato nell'Analisi V8!")
