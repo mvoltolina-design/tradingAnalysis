@@ -85,7 +85,7 @@ def load_portfolio():
 def save_portfolio(df):
     conn = st.connection("gsheets", type=GSheetsConnection)
     # Assicurati di salvare nell'ordine esatto
-    df_to_save = df[COLONNE_PORTAFOGLIO]
+    df_to_save = df[COLONNE_PORTAFOGLIO].copy()
     conn.update(worksheet="Sheet1", data=df_to_save)
     st.cache_data.clear()
 
@@ -367,9 +367,25 @@ if menu == "Aggiungi Titolo":
 elif menu == "Analisi V8":
     st.header("🎯 Analisi Predittiva V8")
     model = load_v8_model()
+    
     if model and os.path.exists("tickers_SP500_2026.csv"):
         t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+        
         if st.button("🚀 AVVIA ANALISI S&P 500"):
             res = fetch_and_predict(t_list, model, 30)
+            
             if not res.empty:
-                st.dataframe(res.sort_values('EVI', ascending=False), use_container_width=True)
+                # --- NUOVA LOGICA DI SALVATAGGIO ---
+                st.subheader("Top Opportunità Rilevate")
+                res_sorted = res.sort_values('EVI', ascending=False)
+                st.dataframe(res_sorted, use_container_width=True)
+                
+                try:
+                    conn = get_gsheet_connection()
+                    # Sovrascrive il tab 'candidati' con i nuovi risultati
+                    conn.update(worksheet="candidati", data=res_sorted)
+                    st.success("✅ Risultati analisi salvati nel tab 'candidati'!")
+                    # Puliamo la cache così il menu "Aggiungi Titolo" vede i nuovi dati
+                    st.cache_data.clear()
+                except Exception as e:
+                    st.error(f"Errore durante il salvataggio dei candidati: {e}")
