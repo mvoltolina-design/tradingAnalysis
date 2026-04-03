@@ -137,65 +137,58 @@ def fetch_and_predict(ticker_list, model, cycles):
 
 # --- 4. LOGICA PORTFOLIO ---
 def update_portfolio_metrics():
-    st.toast("🔄 Controllo mercati in corso...") # Apparirà un piccolo pop-up in basso
     df = load_portfolio()
     if df.empty: return df
     
-    # Pulizia preliminare: convertiamo le colonne numeriche e le date
+    # Pulizia tipi
     for col in ['Prezzo_Carico', 'Max_Raggiunto', 'Min_Raggiunto']:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Assicuriamoci che Data_Acquisto sia in formato datetime per yfinance
-    df['Data_Acquisto'] = pd.to_datetime(df['Data_Acquisto'], errors='coerce')
-    
     active_indices = df[df['Stato'] == 'OPEN'].index
-    if len(active_indices) == 0: return df
 
     for idx in active_indices:
-        ticker = str(df.at[idx, 'Ticker']).replace('.', '-')
-        # Prendiamo la data d'acquisto e la formattiamo per la query API
-        start_date = df.at[idx, 'Data_Acquisto'].strftime('%Y-%m-%d')
-        prezzo_carico = float(df.at[idx, 'Prezzo_Carico'])
+        # Usiamo variabili LOCALI per ogni iterazione per evitare incroci
+        row_ticker = str(df.at[idx, 'Ticker']).strip().replace('.', '-')
+        row_start_date = pd.to_datetime(df.at[idx, 'Data_Acquisto']).strftime('%Y-%m-%d')
+        row_carico = float(df.at[idx, 'Prezzo_Carico'])
 
         try:
-            # 1. Scarichiamo i dati (aggiungiamo un margine per sicurezza)
-            h_data = yf.download(ticker, start=start_date, progress=False, auto_adjust=True)
+            # Scarichiamo SOLO per questo specifico ticker
+            h_data = yf.download(row_ticker, start=row_start_date, progress=False, auto_adjust=True)
+            
             if h_data.empty: continue
             h_data = clean_columns(h_data)
-
-            # --- CORREZIONE LOGICA: FILTRO RIGIDO ---
-            # Forziamo il filtro: tieni solo le date >= data_acquisto
-            h_data = h_data[h_data.index >= pd.to_datetime(start_date)]
             
+            # FILTRO RIGIDO: Solo date >= acquisto
+            h_data = h_data[h_data.index >= pd.to_datetime(row_start_date)]
             if h_data.empty: continue
 
-            # 2. Calcolo dei valori reali SOLO sul periodo filtrato
-            real_max = float(h_data['High'].max())
-            real_min = float(h_data['Low'].min())
+            # --- CALCOLO PROTETTO ---
+            # Il massimo non può essere inferiore al carico al momento dell'acquisto
+            current_max = float(h_data['High'].max())
+            current_min = float(h_data['Low'].min())
             
-            # 3. Se il Massimo reale è più basso del prezzo di carico (raro ma possibile),
-            # usiamo il prezzo di carico come base per non avere dati assurdi
-            real_max = max(real_max, prezzo_carico)
-            real_min = min(real_min, prezzo_carico)
+            # PROTEZIONE: Se yfinance sballa, il Min/Max reale non può ignorare il prezzo di carico
+            # (evita i minimi assurdi a 21.87 se il carico è 255)
+            real_max = max(current_max, row_carico)
+            real_min = min(current_min, row_carico)
+            
+            # Date dei picchi
+            date_max_idx = h_data['High'].idxmax().strftime("%Y-%m-%d")
+            date_min_idx = h_data['Low'].idxmin().strftime("%Y-%m-%d")
 
-            # 4. Troviamo le date
-            date_max_val = h_data['High'].idxmax().strftime("%Y-%m-%d")
-            date_min_val = h_data['Low'].idxmin().strftime("%Y-%m-%d")
-
-            # 5. Scrittura nel DataFrame
+            # SCRITTURA PUNTUALE NELLA RIGA CORRETTA
             df.at[idx, 'Max_Raggiunto'] = real_max
-            df.at[idx, 'Max_Raggiunto%'] = (real_max - prezzo_carico) / prezzo_carico
-            df.at[idx, 'Data_Max'] = date_max_val
-
+            df.at[idx, 'Max_Raggiunto%'] = (real_max - row_carico) / row_carico
+            df.at[idx, 'Data_Max'] = date_max_idx
+            
             df.at[idx, 'Min_Raggiunto'] = real_min
-            df.at[idx, 'Min_Raggiunto%'] = (real_min - prezzo_carico) / prezzo_carico
-            df.at[idx, 'Data_Min'] = date_min_val
+            df.at[idx, 'Min_Raggiunto%'] = (real_min - row_carico) / row_carico
+            df.at[idx, 'Data_Min'] = date_min_idx
 
         except Exception as e:
             continue
-    
-    # Ripristiniamo la data acquisto come stringa prima di salvare su Google
-    df['Data_Acquisto'] = df['Data_Acquisto'].dt.strftime('%Y-%m-%d')
+            
     save_portfolio(df)
     return df
 
