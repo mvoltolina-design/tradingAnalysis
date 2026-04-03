@@ -216,13 +216,12 @@ menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo",
 if menu == "Dashboard Portafoglio":
     st.header("📈 Portafoglio Attivo")
     
-    with st.spinner("Aggiornamento dati da Yahoo Finance..."):
+    with st.spinner("Aggiornamento dati storici..."):
         df_p = update_portfolio_metrics()
     
     if df_p.empty or df_p[df_p['Stato'] == 'OPEN'].empty:
         st.info("Nessun titolo attivo.")
     else:
-        # Raggruppamento per data
         dates = sorted(df_p[df_p['Stato'] == 'OPEN']['Data_Acquisto'].unique(), reverse=True)
 
         for d in dates:
@@ -230,53 +229,67 @@ if menu == "Dashboard Portafoglio":
                 sub = df_p[(df_p['Data_Acquisto'] == d) & (df_p['Stato'] == 'OPEN')]
                 
                 for i, row in sub.iterrows():
-                    # --- RIGA 1: Info Titolo e Performance Reale ---
+                    # --- RIGA 1: PERFORMANCE REALE (VALORI ASSOLUTI) ---
                     c1, c2, c3 = st.columns([1.2, 2, 2])
                     
                     with c1:
                         st.subheader(row['Ticker'])
                         st.caption(f"Carico: **${float(row['Prezzo_Carico']):.2f}**")
-                        # Visualizziamo la Confidence come un piccolo badge
-                        conf_color = "orange" if row['Confidence'] == "Media" else "green"
-                        st.markdown(f"**Conf:** :{conf_color}[{row['Confidence']}]")
+                        # Badge Confidence
+                        conf = str(row['Confidence'])
+                        c_color = "green" if "Alta" in conf else "orange" if "Media" in conf else "red"
+                        st.markdown(f"**Conf:** :{c_color}[{conf}]")
                     
                     with c2:
                         max_r = float(row['Max_Raggiunto'])
                         max_p = float(row['Max_Raggiunto%']) * 100
                         st.write(f"🚀 **Max Reale: ${max_r:.2f}**")
-                        st.caption(f"({max_p:+.2f}%) il {row['Data_Max']}")
+                        st.write(f"({max_p:+.2f}%)")
+                        st.caption(f"🕒 {row['Data_Max']}")
                     
                     with c3:
                         min_r = float(row['Min_Raggiunto'])
                         min_p = float(row['Min_Raggiunto%']) * 100
                         st.write(f"⚠️ **Min Reale: ${min_r:.2f}**")
-                        st.caption(f"({min_p:+.2f}%) il {row['Data_Min']}")
+                        st.write(f"({min_p:+.2f}%)")
+                        st.caption(f"🕒 {row['Data_Min']}")
 
-                    # --- RIGA 2: Target di Analisi (Est_Max / Est_Min) ---
-                    # Usiamo uno sfondo leggermente diverso o testo in corsivo per distinguere le stime
-                    st.markdown("---")
-                    st.caption("🎯 **Target di Analisi V8 (Previsioni)**")
+                    # --- RIGA 2: CONFRONTO TARGET PERCENTUALI (ESTIMATED VS REAL) ---
+                    st.divider()
+                    st.caption("🎯 **Analisi Target (Previsioni % vs Realtà %)**")
                     ca, cb, cc = st.columns([1.2, 2, 2])
                     
+                    # Calcolo distanze dai target
+                    target_max_p = float(row['Est_Max']) * 100 # Es: 0.08 -> 8%
+                    target_min_p = float(row['Est_Min']) * 100 # Es: -0.05 -> -5%
+                    
                     with cb:
-                        e_max = float(row['Est_Max'])
-                        diff_max = ((e_max - max_r) / max_r) * 100 if max_r != 0 else 0
-                        st.write(f"📈 Est. Max: **${e_max:.2f}**")
-                        st.caption(f"Distanza dal picco: {diff_max:+.2f}%")
+                        # Quanto manca al target di guadagno?
+                        dist_max = target_max_p - max_p
+                        color_max = "green" if dist_max <= 0 else "gray" # Verde se raggiunto/superato
+                        st.write(f"📈 Target Max: **{target_max_p:+.2f}%**")
+                        if dist_max <= 0:
+                            st.success("✅ Target raggiunto!")
+                        else:
+                            st.info(f"Mancano {dist_max:.2f} punti %")
 
                     with cc:
-                        e_min = float(row['Est_Min'])
-                        diff_min = ((min_r - e_min) / e_min) * 100 if e_min != 0 else 0
-                        st.write(f"📉 Est. Min: **${e_min:.2f}**")
-                        st.caption(f"Protezione stimata: {diff_min:+.2f}%")
+                        # Quanto siamo vicini al limite minimo previsto?
+                        dist_min = min_p - target_min_p
+                        st.write(f"📉 Target Min: **{target_min_p:+.2f}%**")
+                        if min_p <= target_min_p:
+                            st.error("🚨 Sotto il minimo stimato!")
+                        else:
+                            st.write(f"Margine: {dist_min:.2f} punti %")
 
                     # --- AZIONI ---
-                    if st.button(f"Chiudi Posizione {row['Ticker']}", key=f"close_{i}"):
+                    if st.button(f"Chiudi {row['Ticker']}", key=f"cl_{i}"):
                         df_p.at[i, 'Stato'] = 'CLOSED'
                         save_portfolio(df_p)
                         st.rerun()
                     
                     st.divider()
+                    
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
     
