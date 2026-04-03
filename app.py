@@ -89,11 +89,10 @@ def save_portfolio(df):
     conn.update(worksheet="Sheet1", data=df_to_save)
     st.cache_data.clear()
 
-@st.cache_data(ttl=3600) # 3600 secondi = 1 ora
+@st.cache_data(ttl=3600)
 def load_analisi_data():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        # Impostiamo il ttl della connessione a 1 ora
         df = conn.read(worksheet="candidati", ttl=3600)
         
         if df is not None and not df.empty:
@@ -101,11 +100,12 @@ def load_analisi_data():
             df.columns = [str(c).strip() for c in df.columns]
             return df
         
-        # Se il foglio è vuoto o non esiste, restituiamo un DataFrame con le colonne giuste
+        # Se il foglio è vuoto, restituiamo un DataFrame con le colonne giuste
         return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
-    except Exception:
-        # In caso di errore (es. foglio mancante), restituiamo comunque la struttura
-        return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])umns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
+    except Exception as e:
+        # In caso di errore, restituiamo comunque la struttura minima per non rompere l'app
+        return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
+
 
 @st.cache_resource
 def load_v8_model():
