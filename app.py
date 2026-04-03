@@ -52,25 +52,30 @@ def clean_columns(df):
 def get_gsheet_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
+COLONNE_PORTAFOGLIO = [
+    'Ticker', 'Data_Acquisto', 'Prezzo_Carico', 
+    'Max_Raggiunto', 'Max_Raggiunto%', 'Data_Max', 
+    'Min_Raggiunto', 'Min_Raggiunto%', 'Data_Min', 
+    'Stato', 'Est_Max', 'Est_Min', 'Confidence'
+]
 def load_portfolio():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        # Carica i dati ignorando la cache (ttl=0) per avere dati sempre freschi
-        df = conn.read(worksheet="Sheet1", ttl=0)
-        return df.dropna(how="all")
-    except Exception as e:
-        # Se il foglio è vuoto o non connesso, restituisce lo schema base
-        return pd.DataFrame(columns=['Ticker', 'Data_Acquisto', 'Prezzo_Carico', 'Max_Raggiunto', 'Data_Max', 'Min_Raggiunto', 'Data_Min', 'Stato'])
+        df = conn.read(spreadsheet=SQL_URL, worksheet="Sheet1", ttl=0)
+        # Se il foglio esiste ma mancano le nuove colonne, le aggiunge vuote
+        for col in COLONNE_PORTAFOGLIO:
+            if col not in df.columns:
+                df[col] = None
+        return df
+    except:
+        return pd.DataFrame(columns=COLONNE_PORTAFOGLIO)
 
 def save_portfolio(df):
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
-        # Sovrascrive il foglio con il nuovo DataFrame
-        conn.update(worksheet="Sheet1", data=df)
-        # Piccolo trucco: svuota la cache di lettura per riflettere subito le modifiche
-        st.cache_data.clear() 
-    except Exception as e:
-        st.error(f"Errore nel salvataggio su Google Sheets: {e}")
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Assicurati di salvare nell'ordine esatto
+    df_to_save = df[COLONNE_PORTAFOGLIO]
+    conn.update(spreadsheet=SQL_URL, worksheet="Sheet1", data=df_to_save)
+    st.cache_data.clear()
 
 @st.cache_resource
 def load_v8_model():
@@ -252,23 +257,71 @@ if menu == "Dashboard Portafoglio":
                     
                     st.divider()
 
-elif menu == "Aggiungi Titolo":
-    st.header("🛒 Nuovo Ingresso")
-    t_in = st.text_input("Ticker:").upper()
+if menu == "Aggiungi Titolo":
+    st.header("🆕 Inserimento Nuova Posizione")
+    
+    # 1. Input del Ticker
+    t_in = st.text_input("Ticker (es. AAPL, NVDA):").upper().strip()
+    
     if t_in:
-        d_yf = yf.download(t_in.replace('.', '-'), period="1d", progress=False, auto_adjust=True)
-        if not d_yf.empty:
-            if isinstance(d_yf.columns, pd.MultiIndex): d_yf.columns = d_yf.columns.get_level_values(0)
-            curr = float(d_yf['Close'].iloc[-1])
-            st.metric("Prezzo Attuale", f"${curr:.2f}")
-            entry = st.number_input("Prezzo d'acquisto:", value=curr)
-            if st.button("Salva in Portafoglio"):
+        # Recuperiamo i dati dall'Analisi V8 (assumendo che df_analisi sia il risultato del tuo modello)
+        # Cerchiamo se il ticker esiste nei 'candidati'
+        match = df_analisi[df_analisi['Ticker'] == t_in]
+        
+        # Valori di default
+        default_max = 0.0
+        default_min = 0.0
+        default_conf = "Media"
+        
+        if not match.empty:
+            st.success(f"✅ Titolo trovato nell'Analisi V8!")
+            # Prendiamo i valori dalle colonne P_MAX, P_MIN e CONF dell'analisi
+            default_max = float(match['P_MAX'].values[0])
+            default_min = float(match['P_MIN'].values[0])
+            default_conf = str(match['CONF'].values[0])
+        else:
+            st.warning("⚠️ Titolo non presente nell'ultima Analisi V8. Inserisci i parametri manualmente.")
+
+        # 2. Form di inserimento con valori pre-compilati
+        with st.form("form_aggiunta"):
+            c1, c2 = st.columns(2)
+            entry_price = c1.number_input("Prezzo di Carico ($)", min_value=0.01, step=0.01)
+            
+            st.divider()
+            st.subheader("Target di Analisi")
+            col_a, col_b, col_c = st.columns(3)
+            
+            # Qui l'utente può modificare i valori suggeriti
+            est_max = col_a.number_input("Estimated Max ($)", value=default_max)
+            est_min = col_b.number_input("Estimated Min ($)", value=default_min)
+            conf = col_c.text_input("Confidence Score", value=default_conf)
+            
+            submit = st.form_submit_button("Conferma Acquisto")
+            
+            if submit:
                 df_p = load_portfolio()
-                new = {'Ticker': t_in, 'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"), 'Prezzo_Carico': entry, 
-                       'Max_Raggiunto': curr, 'Data_Max': "In attesa", 'Min_Raggiunto': curr, 'Data_Min': "In attesa", 'Stato': 'OPEN'}
-                save_portfolio(pd.concat([df_p, pd.DataFrame([new])], ignore_index=True))
-                st.success("Salvato!")
-        else: st.error("Ticker non trovato.")
+                
+                # Creazione riga con le 3 nuove colonne
+                new_row = {
+                    'Ticker': t_in,
+                    'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
+                    'Prezzo_Carico': entry_price,
+                    'Max_Raggiunto': entry_price, # Inizializzato al prezzo di carico
+                    'Max_Raggiunto%': 0.0,
+                    'Data_Max': datetime.now().strftime("%Y-%m-%d"),
+                    'Min_Raggiunto': entry_price,
+                    'Min_Raggiunto%': 0.0,
+                    'Data_Min': datetime.now().strftime("%Y-%m-%d"),
+                    'Stato': 'OPEN',
+                    'Est_Max': est_max,       # Nuova colonna
+                    'Est_Min': est_min,       # Nuova colonna
+                    'Confidence': conf        # Nuova colonna
+                }
+                
+                df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
+                save_portfolio(df_p)
+                st.balloons()
+                st.success(f"{t_in} salvato con successo!")
 
 elif menu == "Analisi V8":
     st.header("🎯 Analisi Predittiva V8")
