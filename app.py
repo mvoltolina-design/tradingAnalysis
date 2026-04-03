@@ -326,7 +326,7 @@ if menu == "Dashboard Portafoglio":
                 df_display[col] = df_display[col] * 100
 
         # 3. VERIFICA DI DEBUG (opzionale, decommenta se vuoi vedere i numeri grezzi sopra la tabella)
-        # st.write(df_display[cols_to_perc].head())
+        st.write(df_display[cols_to_perc].head())
 
         # 4. VISUALIZZAZIONE
         st.dataframe(
