@@ -304,81 +304,59 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    st.header("📈 Portafoglio Attivo")
+    st.header("📊 Gestione Portafoglio")
     
-    with st.spinner("Aggiornamento dati storici..."):
-        df_p = update_portfolio_metrics()
+    # Caricamento dati
+    df_port = load_portfolio_data()
     
-    if df_p.empty or df_p[df_p['Stato'] == 'OPEN'].empty:
-        st.info("Nessun titolo attivo.")
+    if df_port.empty:
+        st.info("Il tuo portafoglio è vuoto. Aggiungi un titolo per iniziare.")
     else:
-        dates = sorted(df_p[df_p['Stato'] == 'OPEN']['Data_Acquisto'].unique(), reverse=True)
+        # --- RIGA DELLE METRICHE (KPI) ---
+        # Calcoliamo alcuni dati al volo per la dashboard
+        total_posizioni = len(df_port)
+        # Supponendo di avere una colonna 'Profit_Loss' o simile, altrimenti usiamo dati statici per ora
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Titoli in Portafoglio", total_posizioni)
+        col2.metric("Esposizione Totale", f"{df_port.index.size}", help="Numero di ticket aperti")
+        col3.metric("Status Mercato", "CHIUSO", delta="Venerdì Santo", delta_color="off")
+        col4.metric("Prossima Riapertura", "Lunedì 06/04")
 
-        for d in dates:
-            with st.expander(f"📅 Acquisti del {d}", expanded=True):
-                sub = df_p[(df_p['Data_Acquisto'] == d) & (df_p['Stato'] == 'OPEN')]
-                
-                for i, row in sub.iterrows():
-                    # --- RIGA 1: PERFORMANCE REALE (VALORI ASSOLUTI) ---
-                    c1, c2, c3 = st.columns([1.2, 2, 2])
-                    
-                    with c1:
-                        st.subheader(row['Ticker'])
-                        st.caption(f"Carico: **${float(row['Prezzo_Carico']):.2f}**")
-                        # Badge Confidence
-                        conf = str(row['Confidence'])
-                        c_color = "green" if "Alta" in conf else "orange" if "Media" in conf else "red"
-                        st.markdown(f"**Conf:** :{c_color}[{conf}]")
-                    
-                    with c2:
-                        max_r = float(row['Max_Raggiunto'])
-                        max_p = float(row['Max_Raggiunto%']) * 100
-                        st.write(f"🚀 **Max Reale: ${max_r:.2f}**")
-                        st.write(f"({max_p:+.2f}%)")
-                        st.caption(f"🕒 {row['Data_Max']}")
-                    
-                    with c3:
-                        min_r = float(row['Min_Raggiunto'])
-                        min_p = float(row['Min_Raggiunto%']) * 100
-                        st.write(f"⚠️ **Min Reale: ${min_r:.2f}**")
-                        st.write(f"({min_p:+.2f}%)")
-                        st.caption(f"🕒 {row['Data_Min']}")
+        st.divider()
 
-                    # --- RIGA 2: CONFRONTO TARGET PERCENTUALI (ESTIMATED VS REAL) ---
-                    st.divider()
-                    st.caption("🎯 **Analisi Target (Previsioni % vs Realtà %)**")
-                    ca, cb, cc = st.columns([1.2, 2, 2])
-                    
-                    # Calcolo distanze dai target
-                    target_max_p = float(row['Est_Max']) * 100 # Es: 0.08 -> 8%
-                    target_min_p = float(row['Est_Min']) * 100 # Es: -0.05 -> -5%
-                    
-                    with cb:
-                        # Quanto manca al target di guadagno?
-                        dist_max = target_max_p - max_p
-                        color_max = "green" if dist_max <= 0 else "gray" # Verde se raggiunto/superato
-                        st.write(f"📈 Target Max: **{target_max_p:+.2f}%**")
-                        if dist_max <= 0:
-                            st.success("✅ Target raggiunto!")
-                        else:
-                            st.info(f"Mancano {dist_max:.2f} punti %")
+        # --- VISUALIZZAZIONE TABELLARE COMPATTA ---
+        st.subheader("📝 Dettaglio Posizioni")
+        
+        # Usiamo st.dataframe con configurazione colonne per renderla "pro"
+        # Nascondiamo le colonne meno importanti per la vista rapida
+        colonne_visibili = ['Ticker', 'Quantità', 'Prezzo_Ingresso', 'Stop_Loss', 'Target']
+        
+        # Se mancano alcune colonne nel tuo CSV attuale, il dataframe non crasha ma mostra solo quelle presenti
+        cols_presenti = [c for c in colonne_visibili if c in df_port.columns]
+        
+        st.dataframe(
+            df_port[cols_presenti],
+            use_container_width=True,
+            hide_index=True, # Risparmia spazio a sinistra
+            column_config={
+                "Ticker": st.column_config.TextColumn("Simbolo", help="Ticker azionario"),
+                "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f"),
+                "Stop_Loss": st.column_config.NumberColumn("SL", format="$ %.2f"),
+                "Target": st.column_config.NumberColumn("TP", format="$ %.2f"),
+                "Quantità": st.column_config.NumberColumn("Qty")
+            }
+        )
 
-                    with cc:
-                        # Quanto siamo vicini al limite minimo previsto?
-                        dist_min = min_p - target_min_p
-                        st.write(f"📉 Target Min: **{target_min_p:+.2f}%**")
-                        if min_p <= target_min_p:
-                            st.error("🚨 Sotto il minimo stimato!")
-                        else:
-                            st.write(f"Margine: {dist_min:.2f} punti %")
-
-                    # --- AZIONI ---
-                    if st.button(f"Chiudi {row['Ticker']}", key=f"cl_{i}"):
-                        df_p.at[i, 'Stato'] = 'CLOSED'
-                        save_portfolio(df_p)
-                        st.rerun()
-                    
-                    st.divider()
+        # --- AZIONI RAPIDE ---
+        with st.expander("🛠️ Azioni Portafoglio"):
+            c1, c2 = st.columns(2)
+            if c1.button("🗑️ Svuota Portafoglio (Reset)", use_container_width=True):
+                # Logica per svuotare il CSV/GSheet
+                st.warning("Sei sicuro? Questa azione non può essere annullata.")
+            
+            if c2.button("📥 Esporta in Excel", use_container_width=True):
+                st.write("Funzione in arrivo...")
                     
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
