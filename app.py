@@ -304,7 +304,6 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-   elif menu == "Portafoglio":
     st.header("📊 Analisi Portafoglio Attivo")
     
     # 1. Caricamento dati originale
