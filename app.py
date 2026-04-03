@@ -312,41 +312,47 @@ if menu == "Dashboard Portafoglio":
     if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # --- SOLUZIONE DINAMICA ---
-        # 2. Identifichiamo quali colonne vuoi moltiplicare (senza mandare in crash se mancano)
-        possibili_colonne = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
+        # 2. IDENTIFICAZIONE CHIRURGICA DELLE COLONNE
+        # Vogliamo moltiplicare solo:
+        # - Quelle che FINISCONO con '%'
+        # - Quelle che si chiamano esattamente 'Est_Max', 'Est_Min', 'Confidence'
         
-        # Filtriamo solo quelle che ESISTONO davvero nel tuo DataFrame attuale
-        colonne_presenti = [c for c in possibili_colonne if c in df_port.columns]
-        
-        # 3. MOLTIPLICAZIONE (Solo se la colonna esiste)
-        for col in colonne_presenti:
-            df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
+        target_perc = ["Est_Max", "Est_Min", "Confidence"]
+        found_to_multiply = []
 
-        # 4. CONFIGURAZIONE VISIVA
-        # Creiamo il dizionario di configurazione partendo solo dalle colonne base
-        config_colonne = {
-            "Ticker": st.column_config.TextColumn("Ticker"),
-            "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f")
+        for col in df_port.columns:
+            nome_pulito = col.strip()
+            # Se finisce col simbolo % OPPURE è nella nostra lista fissa
+            if nome_pulito.endswith('%') or nome_pulito in target_perc:
+                try:
+                    # Trasformazione matematica reale
+                    df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
+                    found_to_multiply.append(col)
+                except:
+                    continue
+
+        # 3. CONFIGURAZIONE VISIVA DINAMICA
+        # Partiamo dalle colonne base (che non vanno toccate)
+        config_visuale = {
+            "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+            "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f"),
+            "Max_Raggiunto": st.column_config.NumberColumn("Max Assoluto", format="$ %.2f"), # Esempio valore non %
         }
         
-        # Aggiungiamo alla configurazione le percentuali TROVATE
-        for col in colonne_presenti:
-            config_colonne[col] = st.column_config.NumberColumn(col, format="%.2f%%")
+        # Aggiungiamo le percentuali formattate col simbolo %
+        for col in found_to_multiply:
+            config_visuale[col] = st.column_config.NumberColumn(col, format="%.2f%%")
 
-        # 5. VISUALIZZAZIONE SICURA
-        # Rimuoviamo ogni st.write() di debug che causava il KeyError
+        # 4. RENDERING
         st.dataframe(
             df_port,
             use_container_width=True,
             hide_index=True,
-            column_config=config_colonne
+            column_config=config_visuale
         )
         
-        # Piccolo check per te (apparirà solo se le colonne vengono trovate)
-        if not colonne_presenti:
-            st.warning("⚠️ Nota: Nessuna colonna percentuale trovata. Verifica i nomi nel file CSV.")
-
+        # Debug invisibile (se vuoi vedere cosa ha trovato, decommenta la riga sotto)
+        # st.write(f"Percentuali identificate: {found_to_multiply}")
 
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
