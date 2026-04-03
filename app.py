@@ -310,40 +310,44 @@ if menu == "Dashboard Portafoglio":
     # 1. Caricamento dati originale
     df_port = load_portfolio().copy()
     
-    if df_port.empty:
+   if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # 2. IDENTIFICAZIONE COLONNE REALI
-        # Queste sono le 5 colonne che vuoi vedere come percentuali (es. 5.20%)
-        perc_targets = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
+        # --- SOLUZIONE DINAMICA ---
+        # 2. Identifichiamo quali colonne vuoi moltiplicare (senza mandare in crash se mancano)
+        possibili_colonne = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
         
-        # Troviamo quali di queste sono effettivamente presenti nel tuo DataFrame
-        present_perc_cols = [c for c in perc_targets if c in df_port.columns]
+        # Filtriamo solo quelle che ESISTONO davvero nel tuo DataFrame attuale
+        colonne_presenti = [c for c in possibili_colonne if c in df_port.columns]
         
-        # 3. TRASFORMAZIONE MATEMATICA (* 100)
-        for col in present_perc_cols:
-            # Forza la conversione a numero e moltiplica per 100
+        # 3. MOLTIPLICAZIONE (Solo se la colonna esiste)
+        for col in colonne_presenti:
             df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
 
-        # 4. CONFIGURAZIONE DINAMICA
-        # Creiamo il dizionario di configurazione partendo da zero
-        conf_dinamica = {
-            "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-            "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f")
+        # 4. CONFIGURAZIONE VISIVA
+        # Creiamo il dizionario di configurazione partendo solo dalle colonne base
+        config_colonne = {
+            "Ticker": st.column_config.TextColumn("Ticker"),
+            "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f")
         }
         
-        # Aggiungiamo alla configurazione solo le percentuali che abbiamo trovato e moltiplicato
-        for col in present_perc_cols:
-            conf_dinamica[col] = st.column_config.NumberColumn(col, format="%.2f%%")
+        # Aggiungiamo alla configurazione le percentuali TROVATE
+        for col in colonne_presenti:
+            config_colonne[col] = st.column_config.NumberColumn(col, format="%.2f%%")
 
-        # 5. VISUALIZZAZIONE
-        # Mostriamo il dataframe usando solo le colonne che esistono davvero
+        # 5. VISUALIZZAZIONE SICURA
+        # Rimuoviamo ogni st.write() di debug che causava il KeyError
         st.dataframe(
             df_port,
             use_container_width=True,
             hide_index=True,
-            column_config=conf_dinamica
+            column_config=config_colonne
         )
+        
+        # Piccolo check per te (apparirà solo se le colonne vengono trovate)
+        if not colonne_presenti:
+            st.warning("⚠️ Nota: Nessuna colonna percentuale trovata. Verifica i nomi nel file CSV.")
+
 
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
