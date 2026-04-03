@@ -62,12 +62,23 @@ def load_portfolio():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
         df = conn.read(spreadsheet=SQL_URL, worksheet="Sheet1", ttl=0)
-        # Se il foglio esiste ma mancano le nuove colonne, le aggiunge vuote
+        
+        if df is None or df.empty:
+            return pd.DataFrame(columns=COLONNE_PORTAFOGLIO)
+
+        # RIMOZIONE SPAZI BIANCHI: Spesso il problema è qui
+        df['Stato'] = df['Stato'].astype(str).str.strip()
+        df['Ticker'] = df['Ticker'].astype(str).str.strip()
+
+        # RIPARAZIONE COLONNE MANCANTI: 
+        # Se i titoli sono vecchi e mancano le nuove colonne, le aggiungiamo noi al volo
         for col in COLONNE_PORTAFOGLIO:
             if col not in df.columns:
-                df[col] = None
+                df[col] = 0.0 # O None, per i vecchi titoli
+
         return df
-    except:
+    except Exception as e:
+        st.error(f"Errore caricamento: {e}")
         return pd.DataFrame(columns=COLONNE_PORTAFOGLIO)
 
 def save_portfolio(df):
