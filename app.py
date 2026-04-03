@@ -134,45 +134,69 @@ def fetch_and_predict(ticker_list, model, cycles):
     st.write(f"🧪 Modalità Debug: test su {len(debug_list)} titoli.")
 
     for idx, t in enumerate(debug_list):
-        # 1. Monitoraggio Ticker
         prog_bar.progress((idx + 1) / len(debug_list), text=f"Analizzando {t}...")
         
-        with st.status(f"Elaborazione {t}...", expanded=False) as status:
-            try:
-                # 2. Download Dati
-                st.write(f"Scaricando dati per {t}...")
-                df = yf.download(t.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
-                
-                if df.empty:
-                    st.write("⚠️ DataFrame VUOTO (Yahoo non ha risposto)")
-                    continue
-                
-                df = clean_columns(df)
-                st.write(f"Dati ottenuti: {len(df)} righe.")
+        # Rimuoviamo il try/except generico per vedere l'errore reale
+        st.write(f"--- 🛠️ DEBUG START: {t} ---")
+        
+        # STEP 1: Download
+        df = yf.download(t.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
+        df = clean_columns(df)
+        st.write(f"1. Download OK: {len(df)} righe")
 
-                if len(df) < 250:
-                    st.write(f"⚠️ Righe insufficienti ({len(df)} < 250)")
-                    continue
+        # STEP 2: Indicatori (Punto critico)
+        try:
+            df['MA21'] = ta.sma(df['Close'], length=21)
+            df['MA50'] = ta.sma(df['Close'], length=50)
+            df['MA200'] = ta.sma(df['Close'], length=200)
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            
+            macd_df = ta.macd(df['Close'])
+            # Debug specifico per MACD
+            if macd_df is None or macd_df.empty:
+                st.error("❌ Errore: pandas_ta non ha calcolato il MACD")
+            else:
+                df['MACD'] = macd_df.iloc[:, 0]
+                df['MACD_Signal'] = macd_df.iloc[:, 1]
+                df['MACD_Hi'] = macd_df.iloc[:, 2]
+                st.write("2. Indicatori Tecnici OK")
+        except Exception as e:
+            st.error(f"❌ Errore negli indicatori: {e}")
+            raise e # Forza l'app a mostrare il traceback completo
 
-                # 3. Feature Engineering
-                st.write("Calcolo indicatori tecnici...")
-                # ... (qui tieni il tuo codice di calcolo MA21, RSI, ecc.) ...
-                
-                # 4. Controllo Input Modello
-                df_in = df.dropna().tail(10).copy()
-                st.write(f"Input model shape: {df_in[COLS_ORDER].shape}")
-                
-                input_tensor = torch.tensor(df_in[COLS_ORDER].values, dtype=torch.float32).unsqueeze(0)
+        # STEP 3: VIX Join
+        try:
+            df = df.join(vix_close.rename("VIX_Index"), how='left')
+            df['VIX_Index'] = df['VIX_Index'].ffill().fillna(20.0)
+            st.write("3. VIX Join OK")
+        except Exception as e:
+            st.error(f"❌ Errore nel Join VIX: {e}")
+            raise e
 
-                # 5. Predizione
-                st.write(f"Esecuzione {cycles} cicli Monte Carlo...")
-                mc_preds = []
-                with torch.no_grad():
-                    for c in range(cycles):
-                        pred = model(input_tensor).numpy()
-                        mc_preds.append(pred)
-                
-                st.write("✅ Predizione completata.")
+        # STEP 4: Tensor Prep
+        df_clean = df.dropna().copy()
+        if len(df_clean) < 10:
+            st.warning(f"⚠️ Righe residue dopo dropna: {len(df_clean)}. Troppo poche!")
+        
+        df_in = df_clean.tail(10).copy()
+        df_in['Lookback_Day'] = np.arange(1, 11).astype(float)
+        
+        # Verifica se mancano colonne di COLS_ORDER
+        missing = [c for c in COLS_ORDER if c not in df_in.columns]
+        if missing:
+            st.error(f"❌ Colonne mancanti per il modello: {missing}")
+            raise KeyError(f"Missing cols: {missing}")
+
+        st.write(f"4. Tensor Prep OK (Shape: {df_in[COLS_ORDER].shape})")
+
+        # STEP 5: Model Inference
+        input_tensor = torch.tensor(df_in[COLS_ORDER].values, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            # Test singolo ciclo per vedere se il modello risponde
+            test_pred = model(input_tensor)
+            st.write("5. Model Inference OK")
+            
+        st.write(f"--- ✅ DEBUG END: {t} SUCCESS ---")
                 
                 # Calcoli finali...
                 mc_preds = np.array(mc_preds)
