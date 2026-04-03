@@ -311,7 +311,7 @@ if menu == "Dashboard Portafoglio":
     
    if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
-    else:
+   else:
         # --- SOLUZIONE DINAMICA ---
         # 2. Identifichiamo quali colonne vuoi moltiplicare (senza mandare in crash se mancano)
         possibili_colonne = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
