@@ -303,213 +303,148 @@ def update_portfolio_metrics():
 st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
+# ==========================================
+# 1. SEZIONE DASHBOARD
+# ==========================================
 if menu == "Dashboard Portafoglio":
     st.header("📊 Analisi Portafoglio Attivo")
     
-    # 1. Caricamento dati originale
     df_port = load_portfolio().copy()
     
     if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # 2. IDENTIFICAZIONE CHIRURGICA DELLE COLONNE
-        # Vogliamo moltiplicare solo:
-        # - Quelle che FINISCONO con '%'
-        # - Quelle che si chiamano esattamente 'Est_Max', 'Est_Min', 'Confidence'
-        
         target_perc = ["Est_Max", "Est_Min", "Confidence"]
         found_to_multiply = []
 
         for col in df_port.columns:
             nome_pulito = col.strip()
-            # Se finisce col simbolo % OPPURE è nella nostra lista fissa
             if nome_pulito.endswith('%') or nome_pulito in target_perc:
                 try:
-                    # Trasformazione matematica reale
                     df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
                     found_to_multiply.append(col)
                 except:
                     continue
 
-        # 3. CONFIGURAZIONE VISIVA DINAMICA
-        # Partiamo dalle colonne base (che non vanno toccate)
         config_visuale = {
             "Ticker": st.column_config.TextColumn("Ticker", width="small"),
             "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f"),
-            "Max_Raggiunto": st.column_config.NumberColumn("Max Assoluto", format="$ %.2f"), # Esempio valore non %
+            "Max_Raggiunto": st.column_config.NumberColumn("Max Assoluto", format="$ %.2f"),
         }
         
-        # Aggiungiamo le percentuali formattate col simbolo %
         for col in found_to_multiply:
             config_visuale[col] = st.column_config.NumberColumn(col, format="%.2f%%")
 
-        # 4. RENDERING
         st.dataframe(
             df_port,
             use_container_width=True,
             hide_index=True,
             column_config=config_visuale
         )
-        
-        # Debug invisibile (se vuoi vedere cosa ha trovato, decommenta la riga sotto)
-        # st.write(f"Percentuali identificate: {found_to_multiply}")
 
-df_analisi = load_analisi_data()
-    
-t_in = st.text_input("Ticker (es. AAPL):").upper().strip()
-
-if t_in:
-    # --- 1. RECUPERO PREZZO LIVE DA YFINANCE ---
-    current_market_price = 0.01  # Default minimo
-    try:
-        ticker_yf = yf.Ticker(t_in)
-        # Recuperiamo la history dell'ultimo giorno
-        hist = ticker_yf.history(period="1d")
-        if not hist.empty:
-            current_market_price = float(hist['Close'].iloc[-1])
-            st.caption(f"📈 Ultimo prezzo di mercato rilevato: **{current_market_price:.2f} $**")
-        else:
-            st.info("ℹ️ Impossibile recuperare prezzo live. Inserimento manuale richiesto.")
-    except Exception as e:
-        st.error(f"Errore yfinance: {e}")
-
-    # --- 2. CONTROLLO DATI ANALISI V8 ---
-    if 'Ticker' in df_analisi.columns:
-        match = df_analisi[df_analisi['Ticker'] == t_in]
-    else:
-        st.error("⚠️ La colonna 'Ticker' non è stata trovata nel foglio 'candidati'.")
-        match = pd.DataFrame()
-    
-    # Valori di default per i target
-    default_max = 0.0
-    default_min = 0.0
-    default_conf = "N/D"
-    
-    if not match.empty:
-        st.success(f"✅ Titolo trovato nell'Analisi V8!")
-        default_max = float(match['P_MAX'].values[0])
-        default_min = float(match['P_MIN'].values[0])
-        default_conf = str(match['CONF'].values[0])
-    else:
-        st.warning("⚠️ Titolo non presente nell'ultima Analisi V8. Inserisci i parametri manualmente.")
-
-    # --- 3. FORM DI INSERIMENTO ---
-    with st.form("form_aggiunta"):
-        c1, c2 = st.columns(2)
-        
-        # PRECOMPILAZIONE: impostiamo value=current_market_price
-        entry_price = c1.number_input(
-            "Prezzo di Carico ($)", 
-            min_value=0.0, 
-            value=current_market_price, 
-            format="%.2f",
-            step=0.01
-        )
-        
-        # Possiamo aggiungere qui la quantità se serve, o altri campi
-        
-        st.divider()
-        st.subheader("Target di Analisi")
-        col_a, col_b, col_c = st.columns(3)
-        
-        est_max = col_a.number_input("Estimated Max ($)", value=default_max)
-        est_min = col_b.number_input("Estimated Min ($)", value=default_min)
-        conf = col_c.text_input("Confidence Score", value=default_conf)
-        
-        submit = st.form_submit_button("Conferma Acquisto")
-        
-        if submit:
-            # Caricamento portafoglio (uso la tua funzione esistente)
-            df_p = load_portfolio() 
-            
-            new_row = {
-                'Ticker': t_in,
-                'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
-                'Prezzo_Carico': entry_price,
-                'Max_Raggiunto': entry_price, 
-                'Max_Raggiunto%': 0.0,
-                'Data_Max': datetime.now().strftime("%Y-%m-%d"),
-                'Min_Raggiunto': entry_price,
-                'Min_Raggiunto%': 0.0,
-                'Data_Min': datetime.now().strftime("%Y-%m-%d"),
-                'Stato': 'OPEN',
-                'Est_Max': est_max,
-                'Est_Min': est_min,
-                'Confidence': conf
-            }
-            
-            df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
-            save_portfolio(df_p)
-            st.balloons()
-            st.success(f"Posizione su {t_in} aperta a {entry_price:.2f}$!")
-
-elif menu == "Analisi V8":
-    st.header("🎯 Analisi Predittiva V8")
-    
-    # 1. Caricamento dati (sfrutta la cache di 1 ora definita in load_analisi_data)
+# ==========================================
+# 2. SEZIONE AGGIUNGI TITOLO (Mancava questa riga!)
+# ==========================================
+elif menu == "Aggiungi Titolo":
+    st.header("🆕 Inserimento Nuova Posizione")
     df_analisi = load_analisi_data()
     
-    # Verifichiamo se il DataFrame contiene dati reali (almeno una riga)
+    t_in = st.text_input("Ticker (es. AAPL):").upper().strip()
+    
+    if t_in:
+        # --- 1. RECUPERO PREZZO LIVE DA YFINANCE ---
+        current_market_price = 0.01
+        try:
+            ticker_yf = yf.Ticker(t_in)
+            hist = ticker_yf.history(period="1d")
+            if not hist.empty:
+                current_market_price = float(hist['Close'].iloc[-1])
+                st.caption(f"📈 Ultimo prezzo di mercato rilevato: **{current_market_price:.2f} $**")
+            else:
+                st.info("ℹ️ Impossibile recuperare prezzo live. Inserimento manuale richiesto.")
+        except Exception as e:
+            st.error(f"Errore yfinance: {e}")
+
+        # --- 2. CONTROLLO DATI ANALISI V8 ---
+        if 'Ticker' in df_analisi.columns:
+            match = df_analisi[df_analisi['Ticker'] == t_in]
+        else:
+            st.error("⚠️ La colonna 'Ticker' non è stata trovata.")
+            match = pd.DataFrame()
+        
+        default_max, default_min, default_conf = 0.0, 0.0, "N/D"
+        
+        if not match.empty:
+            st.success(f"✅ Titolo trovato nell'Analisi V8!")
+            default_max = float(match['P_MAX'].values[0])
+            default_min = float(match['P_MIN'].values[0])
+            default_conf = str(match['CONF'].values[0])
+        else:
+            st.warning("⚠️ Titolo non presente nell'Analisi V8.")
+
+        # --- 3. FORM DI INSERIMENTO ---
+        with st.form("form_aggiunta"):
+            c1, c2 = st.columns(2)
+            entry_price = c1.number_input("Prezzo di Carico ($)", min_value=0.0, value=current_market_price, format="%.2f")
+            
+            st.divider()
+            st.subheader("Target di Analisi")
+            col_a, col_b, col_c = st.columns(3)
+            est_max = col_a.number_input("Estimated Max ($)", value=default_max)
+            est_min = col_b.number_input("Estimated Min ($)", value=default_min)
+            conf = col_c.text_input("Confidence Score", value=default_conf)
+            
+            if st.form_submit_button("Conferma Acquisto"):
+                df_p = load_portfolio() 
+                new_row = {
+                    'Ticker': t_in,
+                    'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
+                    'Prezzo_Carico': entry_price,
+                    'Max_Raggiunto': entry_price, 
+                    'Max_Raggiunto%': 0.0,
+                    'Min_Raggiunto': entry_price,
+                    'Min_Raggiunto%': 0.0,
+                    'Stato': 'OPEN',
+                    'Est_Max': est_max, 'Est_Min': est_min, 'Confidence': conf
+                }
+                df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
+                save_portfolio(df_p)
+                st.balloons()
+                st.success(f"Posizione su {t_in} salvata!")
+
+# ==========================================
+# 3. SEZIONE ANALISI V8
+# ==========================================
+elif menu == "Analisi V8":
+    st.header("🎯 Analisi Predittiva V8")
+    df_analisi = load_analisi_data()
     analisi_presente = not df_analisi.empty and len(df_analisi) > 0
 
     if analisi_presente:
-        st.success("✅ Risultati dell'ultima analisi caricati (Validità 1h)")
-        
-        # Mostriamo i risultati ordinati per EVI (il nostro indice di opportunità)
+        st.success("✅ Risultati dell'ultima analisi caricati")
         df_display = df_analisi.sort_values('EVI', ascending=False)
         st.dataframe(df_display, use_container_width=True)
-        
-        st.divider()
-        st.subheader("Aggiornamento Dati")
-        st.write("Vuoi ignorare i dati in memoria e lanciare una nuova scansione di mercato?")
     else:
-        st.warning("⚠️ Nessuna analisi recente trovata nel database 'candidati' o dati scaduti.")
-        st.info("L'analisi dello S&P 500 richiede circa 10-15 minuti. Assicurati di non chiudere la pagina.")
+        st.warning("⚠️ Nessuna analisi recente trovata.")
 
-    # 2. Pulsante di avvio analisi
-    # Se i dati esistono, il pulsante serve per il "Ricalcolo", altrimenti per il "Primo Avvio"
     label_pulsante = "🔄 RICALCOLA ANALISI S&P 500" if analisi_presente else "🚀 AVVIA ANALISI S&P 500"
     
     if st.button(label_pulsante):
         model = load_v8_model()
-        
-        # Controllo presenza file ticker
         if not os.path.exists("tickers_SP500_2026.csv"):
-            st.error("❌ File 'tickers_SP500_2026.csv' non trovato. Impossibile procedere.")
+            st.error("❌ File ticker mancante.")
         elif model is None:
-            st.error("❌ Modello V8 (.pth) non caricato correttamente.")
+            st.error("❌ Modello non caricato.")
         else:
-            # Lettura lista ticker
             t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
-            
-            # Esecuzione Analisi (usiamo 10 cicli Monte Carlo per bilanciare precisione e velocità)
             res = fetch_and_predict(t_list, model, 10)
             
             if not res.empty:
-                st.subheader("Analisi Completata!")
                 res_sorted = res.sort_values('EVI', ascending=False)
-                st.dataframe(res_sorted, use_container_width=True)
-                
-                # --- SALVATAGGIO E PULIZIA CACHE ---
                 try:
                     conn = get_gsheet_connection()
-                    # Sovrascrive il tab 'candidati' con i nuovi dati
                     conn.update(worksheet="candidati", data=res_sorted)
-                    
-                    # CRITICO: Puliamo la cache di Streamlit. 
-                    # Senza questo, load_analisi_data() continuerebbe a leggere i vecchi dati per 1 ora.
                     st.cache_data.clear()
-                    
-                    st.success("✅ Nuovi risultati salvati nel database 'candidati'!")
-                    st.balloons()
-                    
-                    # Ricarichiamo l'app per aggiornare lo stato della dashboard
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Errore durante il salvataggio su Google Sheets: {e}")
-            else:
-                st.error("❌ L'analisi non ha prodotto risultati. Controlla il log di debug.")
-
-    # 3. Footer informativo
-    if analisi_presente:
-        st.caption(f"Ultimo aggiornamento rilevato: {len(df_analisi)} titoli analizzati.")
+                    st.error(f"❌ Errore GSheet: {e}")
