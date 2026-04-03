@@ -90,10 +90,19 @@ def save_portfolio(df):
     st.cache_data.clear()
 
 def load_analisi_data():
-    # Carica il foglio dove tieni i risultati di Analisi V8 (es. 'candidati')
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(worksheet="candidati", ttl=0) # Nome del tab dell'analisi
-    return df
+    try:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df = conn.read(worksheet="candidati", ttl=0)
+        
+        if df is not None and not df.empty:
+            # Pulizia automatica: rimuove spazi bianchi dai nomi delle colonne
+            df.columns = [str(c).strip() for c in df.columns]
+            return df
+        
+        # Se il foglio è vuoto, restituiamo un DataFrame con le colonne giuste
+        return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
+    except Exception as e:
+        return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
 
 @st.cache_resource
 def load_v8_model():
@@ -298,16 +307,18 @@ if menu == "Dashboard Portafoglio":
                     
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
-    # --- RECUPERO DATI ANALISI ---
     df_analisi = load_analisi_data()
     
-    # 1. Input del Ticker
-    t_in = st.text_input("Ticker (es. AAPL, NVDA):").upper().strip()
+    t_in = st.text_input("Ticker (es. AAPL):").upper().strip()
     
     if t_in:
-        # Recuperiamo i dati dall'Analisi V8 (assumendo che df_analisi sia il risultato del tuo modello)
-        # Cerchiamo se il ticker esiste nei 'candidati'
-        match = df_analisi[df_analisi['Ticker'] == t_in]
+        # CONTROLLO DI SICUREZZA:
+        if 'Ticker' in df_analisi.columns:
+            match = df_analisi[df_analisi['Ticker'] == t_in]
+        else:
+            # Se la colonna manca, creiamo un match vuoto per non crashare
+            st.error("⚠️ La colonna 'Ticker' non è stata trovata nel foglio 'candidati'.")
+            match = pd.DataFrame()
         
         # Valori di default
         default_max = 0.0
