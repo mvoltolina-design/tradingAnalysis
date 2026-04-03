@@ -312,14 +312,17 @@ if menu == "Dashboard Portafoglio":
     if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # --- KPI SUPERIORI (Opzionali, per colpo d'occhio) ---
+        # --- KPI SUPERIORI ---
         c1, c2, c3 = st.columns(3)
         c1.metric("Titoli Totali", len(df_port))
-        c2.metric("Mercato", "USA (Chiuso)", "Venerdì Santo", delta_color="off")
-        c3.metric("Riapertura", "Lunedì 15:30")
+        c2.metric("Mercato USA", "CHIUSO", "Venerdì Santo", delta_color="off")
+        c3.metric("Riapertura", "Lunedì 06/04")
 
-        # --- TABELLA COMPATTA MA COMPLETA ---
-        # Definiamo l'ordine e la configurazione per risparmiare spazio
+        # --- PRE-ELABORAZIONE PER PERCENTUALI ---
+        # Se i valori nel CSV sono decimali (es. 0.85), 
+        # la colonna 'Confidenza' verrà mostrata come 85.00% grazie al formatter.
+        # Se sono già interi (es. 85), rimuovi la necessità di calcoli extra.
+        
         st.dataframe(
             df_port,
             use_container_width=True,
@@ -327,36 +330,41 @@ if menu == "Dashboard Portafoglio":
             column_config={
                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                 "Quantità": st.column_config.NumberColumn("Qty", width="small"),
-                "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="%.2f"),
-                "Stop_Loss": st.column_config.NumberColumn("S.L.", format="%.2f"),
-                "Target": st.column_config.NumberColumn("Target", format="%.2f"),
-                "Data": st.column_config.DatetimeColumn("Data Inserimento", format="DD/MM/YY"),
-                "Note": st.column_config.TextColumn("Note", width="medium"),
+                "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f"),
+                "Stop_Loss": st.column_config.NumberColumn("S.L.", format="$ %.2f"),
+                "Target": st.column_config.NumberColumn("Target", format="$ %.2f"),
+                # Formattazione Percentuale per Confidenza (valore * 100)
+                "Confidenza": st.column_config.NumberColumn(
+                    "Conf AI", 
+                    format="%.2f%%", 
+                    help="Affidabilità calcolata dal modello V8"
+                ),
+                # Esempio per altre colonne in percentuale se presenti (es. Rendimento)
+                "Rendimento": st.column_config.NumberColumn("P/L %", format="%.2f%%"),
+                "Data": st.column_config.DatetimeColumn("Data", format="DD/MM/YY"),
             }
         )
 
-        # --- AREA AZIONI (Sotto la tabella per non disturbare) ---
         st.divider()
-        with st.expander("⚙️ Gestione Avanzata"):
+        
+        # --- AZIONI DI GESTIONE ---
+        with st.expander("⚙️ Opzioni Avanzate"):
             col_del, col_csv = st.columns(2)
             
-            # Bottone per eliminazione singola (placeholder logico)
-            ticker_to_del = col_del.selectbox("Seleziona ticker da rimuovere:", ["-"] + df_port['Ticker'].tolist())
-            if col_del.button("❌ Rimuovi Titolo", use_container_width=True) and ticker_to_del != "-":
-                st.warning(f"Funzione di rimozione per {ticker_to_del} in fase di test...")
-            
-            # Export rapido
+            # Export rapido del CSV originale
             csv = df_port.to_csv(index=False).encode('utf-8')
             col_csv.download_button(
-                label="📥 Scarica Portafoglio (CSV)",
+                label="📥 Esporta Portafoglio",
                 data=csv,
-                file_name='mio_portafoglio_ibkr.csv',
+                file_name='portafoglio_v8.csv',
                 mime='text/csv',
                 use_container_width=True
             )
+            
+            if col_del.button("🗑️ Reset Totale Portafoglio", use_container_width=True):
+                st.error("Richiesta reset inviata (Simulazione).")
 
-        st.caption("💡 Suggerimento: Puoi ordinare la tabella cliccando sulle intestazioni delle colonne.")
-                    
+        st.caption("Nota: I valori percentuali sono calcolati sulla base dei dati inseriti nel file di log.")
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
     df_analisi = load_analisi_data()
