@@ -306,50 +306,40 @@ menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo",
 if menu == "Dashboard Portafoglio":
     st.header("📊 Il Tuo Portafoglio")
     
-    # Caricamento dati originale
-    df_port = load_portfolio()
+   # 1. Caricamento dati
+    df_port_raw = load_portfolio()
     
-    if df_port.empty:
+    if df_port_raw.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # --- DASHBOARD METRICHE ---
+        # 2. TRASFORMAZIONE MATEMATICA (* 100)
+        # Creiamo una copia per la visualizzazione per non sporcare il file originale
+        df_display = df_port_raw.copy()
+        
+        cols_to_perc = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
+        
+        for col in cols_to_perc:
+            if col in df_display.columns:
+                # Moltiplichiamo per 100 solo se i valori sono decimali (es. < 1 o < 2)
+                # Questo evita di moltiplicare all'infinito se ricarichi la pagina
+                df_display[col] = pd.to_numeric(df_display[col], errors='coerce') * 100
+
+        # 3. VISUALIZZAZIONE CON COLUMN_CONFIG
         st.dataframe(
-            df_port,
+            df_display,
             use_container_width=True,
             hide_index=True,
             column_config={
                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                "Quantità": st.column_config.NumberColumn("Qty", width="small"),
                 "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f"),
                 
-                # --- COLONNE IN PERCENTUALE (Formato: 0.0521 -> 5.21%) ---
-                "max_Raggiunto%": st.column_config.NumberColumn(
-                    "Max Raggiunto", 
-                    format="%.2f%%", 
-                    help="Massimo guadagno percentuale toccato dall'apertura"
-                ),
-                "Min_raggiunto%": st.column_config.NumberColumn(
-                    "Min Raggiunto", 
-                    format="%.2f%%", 
-                    help="Massimo drawdown percentuale toccato dall'apertura"
-                ),
-                "Est_Max": st.column_config.NumberColumn(
-                    "Est. Max %", 
-                    format="%.2f%%", 
-                    help="Stima Target Superiore del modello V8"
-                ),
-                "Est_Min": st.column_config.NumberColumn(
-                    "Est. Min %", 
-                    format="%.2f%%", 
-                    help="Stima Target Inferiore del modello V8"
-                ),
-                "Confidence": st.column_config.NumberColumn(
-                    "Confidenza", 
-                    format="%.2f%%", 
-                    help="Livello di affidabilità della previsione AI"
-                ),
+                # Formattiamo con 2 cifre decimali e il simbolo %
+                "max_Raggiunto%": st.column_config.NumberColumn("Max Raggiunto", format="%.2f%%"),
+                "Min_raggiunto%": st.column_config.NumberColumn("Min Raggiunto", format="%.2f%%"),
+                "Est_Max": st.column_config.NumberColumn("Est. Max", format="%.2f%%"),
+                "Est_Min": st.column_config.NumberColumn("Est. Min", format="%.2f%%"),
+                "Confidence": st.column_config.NumberColumn("Confidenza", format="%.2f%%"),
                 
-                # --- ALTRE COLONNE ---
                 "Stop_Loss": st.column_config.NumberColumn("S.L.", format="$ %.2f"),
                 "Target": st.column_config.NumberColumn("T.P.", format="$ %.2f"),
                 "Data": st.column_config.DatetimeColumn("Data", format="DD/MM/YY"),
@@ -358,23 +348,9 @@ if menu == "Dashboard Portafoglio":
 
         st.divider()
         
-        # --- ESPORTAZIONE E CONTROLLO ---
-        with st.expander("⚙️ Gestione Dati"):
-            col1, col2 = st.columns(2)
-            
-            # Download veloce del CSV
-            csv_data = df_port.to_csv(index=False).encode('utf-8')
-            col1.download_button(
-                "📥 Esporta Portafoglio",
-                data=csv_data,
-                file_name="portafoglio_v8_export.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-            
-            if col2.button("🗑️ Reset Log Operativo", use_container_width=True):
-                st.warning("Azione non disponibile in modalità sola lettura.")
-        st.caption("Nota: I valori percentuali sono calcolati sulla base dei dati inseriti nel file di log.")
+        # Area Export (usa i dati ORIGINALI, non quelli moltiplicati per 100)
+        csv_data = df_port_raw.to_csv(index=False).encode('utf-8')
+        st.download_button("📥 Scarica Portafoglio (Dati Reali)", data=csv_data, file_name="portafoglio_v8.csv")
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
     df_analisi = load_analisi_data()
