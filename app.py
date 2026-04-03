@@ -137,6 +137,7 @@ def fetch_and_predict(ticker_list, model, cycles):
 
 # --- 4. LOGICA PORTFOLIO ---
 def update_portfolio_metrics():
+    st.toast("🔄 Controllo mercati in corso...") # Apparirà un piccolo pop-up in basso
     df = load_portfolio()
     if df.empty: return df
     
@@ -196,7 +197,7 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    st.header("📈 Portafoglio Attivo (Analisi Storica)")
+    st.header("📈 Portafoglio Attivo")
     
     # 1. Esegue l'aggiornamento (scarica i dati da yfinance dal giorno d'acquisto)
     with st.spinner("Sincronizzazione dati storici con Google Sheets..."):
