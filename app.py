@@ -356,92 +356,92 @@ if menu == "Dashboard Portafoglio":
 
 df_analisi = load_analisi_data()
     
-    t_in = st.text_input("Ticker (es. AAPL):").upper().strip()
+t_in = st.text_input("Ticker (es. AAPL):").upper().strip()
+
+if t_in:
+    # --- 1. RECUPERO PREZZO LIVE DA YFINANCE ---
+    current_market_price = 0.01  # Default minimo
+    try:
+        ticker_yf = yf.Ticker(t_in)
+        # Recuperiamo la history dell'ultimo giorno
+        hist = ticker_yf.history(period="1d")
+        if not hist.empty:
+            current_market_price = float(hist['Close'].iloc[-1])
+            st.caption(f"📈 Ultimo prezzo di mercato rilevato: **{current_market_price:.2f} $**")
+        else:
+            st.info("ℹ️ Impossibile recuperare prezzo live. Inserimento manuale richiesto.")
+    except Exception as e:
+        st.error(f"Errore yfinance: {e}")
+
+    # --- 2. CONTROLLO DATI ANALISI V8 ---
+    if 'Ticker' in df_analisi.columns:
+        match = df_analisi[df_analisi['Ticker'] == t_in]
+    else:
+        st.error("⚠️ La colonna 'Ticker' non è stata trovata nel foglio 'candidati'.")
+        match = pd.DataFrame()
     
-    if t_in:
-        # --- 1. RECUPERO PREZZO LIVE DA YFINANCE ---
-        current_market_price = 0.01  # Default minimo
-        try:
-            ticker_yf = yf.Ticker(t_in)
-            # Recuperiamo la history dell'ultimo giorno
-            hist = ticker_yf.history(period="1d")
-            if not hist.empty:
-                current_market_price = float(hist['Close'].iloc[-1])
-                st.caption(f"📈 Ultimo prezzo di mercato rilevato: **{current_market_price:.2f} $**")
-            else:
-                st.info("ℹ️ Impossibile recuperare prezzo live. Inserimento manuale richiesto.")
-        except Exception as e:
-            st.error(f"Errore yfinance: {e}")
+    # Valori di default per i target
+    default_max = 0.0
+    default_min = 0.0
+    default_conf = "N/D"
+    
+    if not match.empty:
+        st.success(f"✅ Titolo trovato nell'Analisi V8!")
+        default_max = float(match['P_MAX'].values[0])
+        default_min = float(match['P_MIN'].values[0])
+        default_conf = str(match['CONF'].values[0])
+    else:
+        st.warning("⚠️ Titolo non presente nell'ultima Analisi V8. Inserisci i parametri manualmente.")
 
-        # --- 2. CONTROLLO DATI ANALISI V8 ---
-        if 'Ticker' in df_analisi.columns:
-            match = df_analisi[df_analisi['Ticker'] == t_in]
-        else:
-            st.error("⚠️ La colonna 'Ticker' non è stata trovata nel foglio 'candidati'.")
-            match = pd.DataFrame()
+    # --- 3. FORM DI INSERIMENTO ---
+    with st.form("form_aggiunta"):
+        c1, c2 = st.columns(2)
         
-        # Valori di default per i target
-        default_max = 0.0
-        default_min = 0.0
-        default_conf = "N/D"
+        # PRECOMPILAZIONE: impostiamo value=current_market_price
+        entry_price = c1.number_input(
+            "Prezzo di Carico ($)", 
+            min_value=0.0, 
+            value=current_market_price, 
+            format="%.2f",
+            step=0.01
+        )
         
-        if not match.empty:
-            st.success(f"✅ Titolo trovato nell'Analisi V8!")
-            default_max = float(match['P_MAX'].values[0])
-            default_min = float(match['P_MIN'].values[0])
-            default_conf = str(match['CONF'].values[0])
-        else:
-            st.warning("⚠️ Titolo non presente nell'ultima Analisi V8. Inserisci i parametri manualmente.")
-
-        # --- 3. FORM DI INSERIMENTO ---
-        with st.form("form_aggiunta"):
-            c1, c2 = st.columns(2)
+        # Possiamo aggiungere qui la quantità se serve, o altri campi
+        
+        st.divider()
+        st.subheader("Target di Analisi")
+        col_a, col_b, col_c = st.columns(3)
+        
+        est_max = col_a.number_input("Estimated Max ($)", value=default_max)
+        est_min = col_b.number_input("Estimated Min ($)", value=default_min)
+        conf = col_c.text_input("Confidence Score", value=default_conf)
+        
+        submit = st.form_submit_button("Conferma Acquisto")
+        
+        if submit:
+            # Caricamento portafoglio (uso la tua funzione esistente)
+            df_p = load_portfolio() 
             
-            # PRECOMPILAZIONE: impostiamo value=current_market_price
-            entry_price = c1.number_input(
-                "Prezzo di Carico ($)", 
-                min_value=0.0, 
-                value=current_market_price, 
-                format="%.2f",
-                step=0.01
-            )
+            new_row = {
+                'Ticker': t_in,
+                'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
+                'Prezzo_Carico': entry_price,
+                'Max_Raggiunto': entry_price, 
+                'Max_Raggiunto%': 0.0,
+                'Data_Max': datetime.now().strftime("%Y-%m-%d"),
+                'Min_Raggiunto': entry_price,
+                'Min_Raggiunto%': 0.0,
+                'Data_Min': datetime.now().strftime("%Y-%m-%d"),
+                'Stato': 'OPEN',
+                'Est_Max': est_max,
+                'Est_Min': est_min,
+                'Confidence': conf
+            }
             
-            # Possiamo aggiungere qui la quantità se serve, o altri campi
-            
-            st.divider()
-            st.subheader("Target di Analisi")
-            col_a, col_b, col_c = st.columns(3)
-            
-            est_max = col_a.number_input("Estimated Max ($)", value=default_max)
-            est_min = col_b.number_input("Estimated Min ($)", value=default_min)
-            conf = col_c.text_input("Confidence Score", value=default_conf)
-            
-            submit = st.form_submit_button("Conferma Acquisto")
-            
-            if submit:
-                # Caricamento portafoglio (uso la tua funzione esistente)
-                df_p = load_portfolio() 
-                
-                new_row = {
-                    'Ticker': t_in,
-                    'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
-                    'Prezzo_Carico': entry_price,
-                    'Max_Raggiunto': entry_price, 
-                    'Max_Raggiunto%': 0.0,
-                    'Data_Max': datetime.now().strftime("%Y-%m-%d"),
-                    'Min_Raggiunto': entry_price,
-                    'Min_Raggiunto%': 0.0,
-                    'Data_Min': datetime.now().strftime("%Y-%m-%d"),
-                    'Stato': 'OPEN',
-                    'Est_Max': est_max,
-                    'Est_Min': est_min,
-                    'Confidence': conf
-                }
-                
-                df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
-                save_portfolio(df_p)
-                st.balloons()
-                st.success(f"Posizione su {t_in} aperta a {entry_price:.2f}$!")
+            df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
+            save_portfolio(df_p)
+            st.balloons()
+            st.success(f"Posizione su {t_in} aperta a {entry_price:.2f}$!")
 
 elif menu == "Analisi V8":
     st.header("🎯 Analisi Predittiva V8")
