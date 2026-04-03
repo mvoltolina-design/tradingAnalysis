@@ -304,7 +304,7 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    st.header("📊 Il Tuo Portafoglio")
+    st.header("📊 Il Tuo Portafoglio").copy()
     
    # 1. Caricamento dati
     df_port_raw = load_portfolio()
