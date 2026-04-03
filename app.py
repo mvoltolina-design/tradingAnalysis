@@ -304,14 +304,6 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    Hai perfettamente ragione, scusa l'eccesso di "pulizia"! Quando si cerca di compattare, il rischio è di nascondere dati che invece ti servono per l'operatività quotidiana.
-
-Riprendiamo tutte le tue colonne originali (Prezzo di Carico, Quantità, Stop Loss, Target, Data Inserimento, etc.) e usiamo le funzioni avanzate di st.dataframe per renderle leggibili in una sola schermata senza dover scrollare lateralmente all'infinito.
-
-Ecco il blocco elif menu == "Portafoglio": completo e fedele ai tuoi dati originali:
-
-Python
-elif menu == "Portafoglio":
     st.header("📊 Il Tuo Portafoglio")
     
     # Caricamento dati originale
