@@ -9,6 +9,12 @@ import os
 from datetime import datetime
 from streamlit_gsheets import GSheetsConnection
 
+COLONNE_PORTAFOGLIO = [
+    'Ticker', 'Data_Acquisto', 'Prezzo_Carico', 
+    'Max_Raggiunto', 'Max_Raggiunto%', 'Data_Max', 
+    'Min_Raggiunto', 'Min_Raggiunto%', 'Data_Min', 
+    'Stato', 'Est_Max', 'Est_Min', 'Confidence'
+]
 # --- 1. CONFIGURAZIONE E ARCHITETTURA MODELLO ---
 class IrisTransformer(nn.Module):
     def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
@@ -36,7 +42,7 @@ class IrisTransformer(nn.Module):
 COLS_ORDER = [
     'Lookback_Day', 'T_close', 'T_open', 'T_min', 'T_max', 
     'Ratio_MA21', 'Ratio_MA50', 'Ratio_MA200', 'RSI', 
-    'MACD', 'MACD_Signal', 'MACD_Hist', 'Vol_Ratio', 
+    'MACD', 'MACD_Signal', 'MACD_Hi', 'Vol_Ratio', 
     'Is_Quarter_End', 'Recent_Div', 'VIX_Index'
 ]
 
@@ -52,12 +58,7 @@ def clean_columns(df):
 def get_gsheet_connection():
     return st.connection("gsheets", type=GSheetsConnection)
 
-COLONNE_PORTAFOGLIO = [
-    'Ticker', 'Data_Acquisto', 'Prezzo_Carico', 
-    'Max_Raggiunto', 'Max_Raggiunto%', 'Data_Max', 
-    'Min_Raggiunto', 'Min_Raggiunto%', 'Data_Min', 
-    'Stato', 'Est_Max', 'Est_Min', 'Confidence'
-]
+
 def load_portfolio():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
