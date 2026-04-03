@@ -312,25 +312,23 @@ if menu == "Dashboard Portafoglio":
     if df_port_raw.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # 2. TRASFORMAZIONE MATEMATICA (* 100)
-        # Creiamo una copia per la visualizzazione per non alterare i calcoli originali
+        # 2. TRASFORMAZIONE MATEMATICA FORZATA
         df_display = df_port_raw.copy()
         
-        # Lista completa delle colonne che devono essere espresse in formato "Intero %"
-        cols_to_perc = [
-            "max_Raggiunto%", 
-            "Min_raggiunto%", 
-            "Est_Max", 
-            "Est_Min", 
-            "Confidence"
-        ]
+        # Elenco esatto delle colonne da trasformare
+        cols_to_perc = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
         
         for col in cols_to_perc:
             if col in df_display.columns:
-                # Convertiamo in numerico (gestendo eventuali stringhe o NaN) e moltiplichiamo
-                df_display[col] = pd.to_numeric(df_display[col], errors='coerce') * 100
+                # Forza la conversione a float e moltiplica esplicitamente
+                df_display[col] = pd.to_numeric(df_display[col], errors='coerce').fillna(0.0)
+                # La moltiplicazione avviene qui
+                df_display[col] = df_display[col] * 100
 
-        # 3. VISUALIZZAZIONE TABELLARE
+        # 3. VERIFICA DI DEBUG (opzionale, decommenta se vuoi vedere i numeri grezzi sopra la tabella)
+        # st.write(df_display[cols_to_perc].head())
+
+        # 4. VISUALIZZAZIONE
         st.dataframe(
             df_display,
             use_container_width=True,
@@ -339,9 +337,9 @@ if menu == "Dashboard Portafoglio":
                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                 "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f"),
                 
-                # Formattazione visiva: aggiunge il simbolo % al numero già moltiplicato
-                "max_Raggiunto%": st.column_config.NumberColumn("Max Ragg. %", format="%.2f%%"),
-                "Min_raggiunto%": st.column_config.NumberColumn("Min Ragg. %", format="%.2f%%"),
+                # Ora che il numero è ad esempio 5.21, il format lo mostra come 5.21%
+                "max_Raggiunto%": st.column_config.NumberColumn("Max Ragg.", format="%.2f%%"),
+                "Min_raggiunto%": st.column_config.NumberColumn("Min Ragg.", format="%.2f%%"),
                 "Est_Max": st.column_config.NumberColumn("Est. Max", format="%.2f%%"),
                 "Est_Min": st.column_config.NumberColumn("Est. Min", format="%.2f%%"),
                 "Confidence": st.column_config.NumberColumn("Confidenza", format="%.2f%%"),
@@ -351,11 +349,6 @@ if menu == "Dashboard Portafoglio":
                 "Data": st.column_config.DatetimeColumn("Data", format="DD/MM/YY"),
             }
         )
-
-        st.divider()
-        
-        # Footer con info di mercato (Venerdì Santo 2026)
-        st.caption("⚠️ I dati sono aggiornati all'ultima chiusura disponibile. Mercati USA chiusi oggi per festività.")
 
 
 if menu == "Aggiungi Titolo":
