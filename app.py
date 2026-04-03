@@ -158,23 +158,31 @@ def update_portfolio_metrics():
         prezzo_carico = float(df.at[idx, 'Prezzo_Carico'])
 
         try:
-            # Query storica: scarica TUTTI i giorni dal momento dell'acquisto ad oggi
+            # 1. Scarichiamo i dati (aggiungiamo un margine per sicurezza)
             h_data = yf.download(ticker, start=start_date, progress=False, auto_adjust=True)
-            
-            if h_data.empty:
-                continue
-                
+            if h_data.empty: continue
             h_data = clean_columns(h_data)
 
-            # Calcolo dei valori reali nel periodo (High e Low massimi/minimi)
+            # --- CORREZIONE LOGICA: FILTRO RIGIDO ---
+            # Forziamo il filtro: tieni solo le date >= data_acquisto
+            h_data = h_data[h_data.index >= pd.to_datetime(start_date)]
+            
+            if h_data.empty: continue
+
+            # 2. Calcolo dei valori reali SOLO sul periodo filtrato
             real_max = float(h_data['High'].max())
             real_min = float(h_data['Low'].min())
             
-            # Troviamo le date esatte dei picchi
+            # 3. Se il Massimo reale è più basso del prezzo di carico (raro ma possibile),
+            # usiamo il prezzo di carico come base per non avere dati assurdi
+            real_max = max(real_max, prezzo_carico)
+            real_min = min(real_min, prezzo_carico)
+
+            # 4. Troviamo le date
             date_max_val = h_data['High'].idxmax().strftime("%Y-%m-%d")
             date_min_val = h_data['Low'].idxmin().strftime("%Y-%m-%d")
 
-            # Scrittura forzata sul DataFrame (sovrascrive "In attesa")
+            # 5. Scrittura nel DataFrame
             df.at[idx, 'Max_Raggiunto'] = real_max
             df.at[idx, 'Max_Raggiunto%'] = (real_max - prezzo_carico) / prezzo_carico
             df.at[idx, 'Data_Max'] = date_max_val
@@ -184,7 +192,6 @@ def update_portfolio_metrics():
             df.at[idx, 'Data_Min'] = date_min_val
 
         except Exception as e:
-            st.error(f"Errore query storica per {ticker}: {e}")
             continue
     
     # Ripristiniamo la data acquisto come stringa prima di salvare su Google
