@@ -116,101 +116,127 @@ def load_v8_model():
 
 # --- 3. ENGINE DI PREDIZIONE ---
 def fetch_and_predict(ticker_list, model, cycles):
-    st.write("🔍 DEBUG: Avvio scaricamento VIX...")
+    st.write("🔍 **DEBUG START**: Inizio scaricamento dati VIX...")
+    
+    # 1. Recupero VIX (Benchmark per il modello)
     try:
         vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
+        if isinstance(vix.columns, pd.MultiIndex):
+            vix.columns = vix.columns.get_level_values(0)
         vix = clean_columns(vix)
         vix_close = vix['Close']
-        st.write("✅ VIX scaricato correttamente.")
+        st.write("✅ VIX scaricato con successo.")
     except Exception as e:
-        st.error(f"❌ Errore VIX: {e}")
+        st.error(f"❌ Errore critico download VIX: {e}")
+        # Fallback per non bloccare l'intera analisi se il VIX ha problemi temporanei
         vix_close = pd.Series(20.0, index=pd.date_range(end=datetime.now(), periods=30))
 
     results = []
     prog_bar = st.progress(0, text="Inizializzazione...")
     
-    # Prendiamo solo i primi 5 per il debug veloce
-    debug_list = ticker_list[:5] 
-    st.write(f"🧪 Modalità Debug: test su {len(debug_list)} titoli.")
-
-    for idx, t in enumerate(debug_list):
-        prog_bar.progress((idx + 1) / len(debug_list), text=f"Analizzando {t}...")
+    # Per il debug, puoi limitare la lista: debug_list = ticker_list[:10]
+    for idx, t in enumerate(ticker_list):
+        prog_bar.progress((idx + 1) / len(ticker_list), text=f"Analisi in corso: {t}...")
         
-        # Rimuoviamo il try/except generico per vedere l'errore reale
-        st.write(f"--- 🛠️ DEBUG START: {t} ---")
-        
-        # STEP 1: Download
-        df = yf.download(t.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
-        df = clean_columns(df)
-        st.write(f"1. Download OK: {len(df)} righe")
-
-        # STEP 2: Indicatori (Punto critico)
         try:
+            # 2. Download Dati Titolo
+            # Gestione ticker con punti (es. BRK.B -> BRK-B)
+            tk_fixed = str(t).replace('.', '-')
+            df = yf.download(tk_fixed, period="1y", progress=False, auto_adjust=True)
+            
+            if df.empty:
+                continue
+            
+            # Pulizia MultiIndex (Necessaria per le ultime versioni di yfinance)
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df = clean_columns(df)
+
+            if len(df) < 250:
+                continue
+
+            # 3. Feature Engineering (Punto critico per il KeyError)
+            # Calcoliamo gli indicatori usando pandas_ta
             df['MA21'] = ta.sma(df['Close'], length=21)
             df['MA50'] = ta.sma(df['Close'], length=50)
             df['MA200'] = ta.sma(df['Close'], length=200)
             df['RSI'] = ta.rsi(df['Close'], length=14)
             
             macd_df = ta.macd(df['Close'])
-            # Debug specifico per MACD
-            if macd_df is None or macd_df.empty:
-                st.error("❌ Errore: pandas_ta non ha calcolato il MACD")
-            else:
+            if macd_df is not None and not macd_df.empty:
+                # Usiamo iloc per evitare errori se i nomi delle colonne variano
                 df['MACD'] = macd_df.iloc[:, 0]
                 df['MACD_Signal'] = macd_df.iloc[:, 1]
                 df['MACD_Hi'] = macd_df.iloc[:, 2]
-                st.write("2. Indicatori Tecnici OK")
-        except Exception as e:
-            st.error(f"❌ Errore negli indicatori: {e}")
-            raise e # Forza l'app a mostrare il traceback completo
+            else:
+                continue # Salta se il MACD fallisce
 
-        # STEP 3: VIX Join
-        try:
+            df['T_open'] = df['Open'].pct_change() * 100
+            df['T_close'] = df['Close'].pct_change() * 100
+            df['T_min'] = df['Low'].pct_change() * 100
+            df['T_max'] = df['High'].pct_change() * 100
+            
+            df['Ratio_MA21'] = df['Close'] / df['MA21']
+            df['Ratio_MA50'] = df['Close'] / df['MA50']
+            df['Ratio_MA200'] = df['Close'] / df['MA200']
+            df['Vol_Ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
+            
+            df['Is_Quarter_End'] = df.index.is_quarter_end.astype(float)
+            df['Recent_Div'] = 0.0
+            
+            # Allineamento VIX
             df = df.join(vix_close.rename("VIX_Index"), how='left')
             df['VIX_Index'] = df['VIX_Index'].ffill().fillna(20.0)
-            st.write("3. VIX Join OK")
-        except Exception as e:
-            st.error(f"❌ Errore nel Join VIX: {e}")
-            raise e
 
-        # STEP 4: Tensor Prep
-        df_clean = df.dropna().copy()
-        if len(df_clean) < 10:
-            st.warning(f"⚠️ Righe residue dopo dropna: {len(df_clean)}. Troppo poche!")
-        
-        df_in = df_clean.tail(10).copy()
-        df_in['Lookback_Day'] = np.arange(1, 11).astype(float)
-        
-        # Verifica se mancano colonne di COLS_ORDER
-        missing = [c for c in COLS_ORDER if c not in df_in.columns]
-        if missing:
-            st.error(f"❌ Colonne mancanti per il modello: {missing}")
-            raise KeyError(f"Missing cols: {missing}")
+            # 4. Preparazione Tensor per il Modello
+            # Dropna rimuove le righe iniziali necessarie alle medie mobili (es. prime 200)
+            df_clean = df.dropna().copy()
+            if len(df_clean) < 10:
+                continue
 
-        st.write(f"4. Tensor Prep OK (Shape: {df_in[COLS_ORDER].shape})")
-
-        # STEP 5: Model Inference
-        input_tensor = torch.tensor(df_in[COLS_ORDER].values, dtype=torch.float32).unsqueeze(0)
-        with torch.no_grad():
-            # Test singolo ciclo per vedere se il modello risponde
-            test_pred = model(input_tensor)
-            st.write("5. Model Inference OK")
+            df_in = df_clean.tail(10).copy()
+            df_in['Lookback_Day'] = np.arange(1, 11).astype(float)
             
-        st.write(f"--- ✅ DEBUG END: {t} SUCCESS ---")
-                
-        # Calcoli finali...
-        mc_preds = np.array(mc_preds)
-        p_max, p_min = np.mean(mc_preds[:,:,3]), np.mean(mc_preds[:,:,2])
-        conf = 1 / (1 + np.std(mc_preds[:,:,3]))
-        
-        results.append({'Ticker': t, 'EVI': conf * p_max, 'P_MAX': p_max, 'P_MIN': p_min, 'CONF': conf})
-        status.update(label=f"✅ {t} Completato", state="complete")
+            # Verifica finale colonne: COLS_ORDER deve corrispondere al DNA del modello
+            input_data = df_in[COLS_ORDER].values
+            input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0)
 
-    except Exception as e:
-        st.error(f"❌ Errore critico su {t}: {e}")
-        status.update(label=f"❌ {t} Fallito", state="error")
-        continue
-    
+            # 5. Inferenza Monte Carlo
+            mc_preds = []
+            with torch.no_grad():
+                for _ in range(cycles):
+                    # Il modello deve essere in model.train() per attivare il Dropout
+                    pred = model(input_tensor).numpy()
+                    mc_preds.append(pred)
+            
+            mc_preds = np.array(mc_preds)
+            
+            # Supponendo che l'output del modello sia [Batch, 4]
+            # dove index 3 = Max, index 2 = Min
+            p_max = np.mean(mc_preds[:, :, 3])
+            p_min = np.mean(mc_preds[:, :, 2])
+            
+            # La confidenza è l'inverso della deviazione standard del Max
+            std_max = np.std(mc_preds[:, :, 3])
+            conf = 1 / (1 + std_max)
+            
+            # EVI (Expected Value Index) per il ranking
+            evi = conf * p_max
+            
+            results.append({
+                'Ticker': t, 
+                'EVI': evi, 
+                'P_MAX': p_max, 
+                'P_MIN': p_min, 
+                'CONF': conf
+            })
+
+        except Exception as e:
+            # Se un ticker fallisce, stampiamo l'errore specifico ma proseguiamo
+            st.warning(f"⚠️ Errore su {t}: {e}")
+            continue
+            
+    # Restituisce il DataFrame finale
     return pd.DataFrame(results)
 
 # --- 4. LOGICA PORTFOLIO ---
