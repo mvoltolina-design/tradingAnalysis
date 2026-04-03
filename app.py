@@ -309,9 +309,9 @@ if menu == "Dashboard Portafoglio":
     # 1. Caricamento dati originale
     df_port = load_portfolio().copy()
     
-   if df_port.empty:
+    if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
-   else:
+    else:
         # --- SOLUZIONE DINAMICA ---
         # 2. Identifichiamo quali colonne vuoi moltiplicare (senza mandare in crash se mancano)
         possibili_colonne = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
