@@ -116,54 +116,76 @@ def load_v8_model():
 
 # --- 3. ENGINE DI PREDIZIONE ---
 def fetch_and_predict(ticker_list, model, cycles):
-    vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
-    vix_close = clean_columns(vix)['Close']
-    
+    st.write("🔍 DEBUG: Avvio scaricamento VIX...")
+    try:
+        vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
+        vix = clean_columns(vix)
+        vix_close = vix['Close']
+        st.write("✅ VIX scaricato correttamente.")
+    except Exception as e:
+        st.error(f"❌ Errore VIX: {e}")
+        vix_close = pd.Series(20.0, index=pd.date_range(end=datetime.now(), periods=30))
+
     results = []
     prog_bar = st.progress(0, text="Inizializzazione...")
     
-    for idx, t in enumerate(ticker_list):
-        try:
-            df = yf.download(t.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
-            df = clean_columns(df)
-            if len(df) < 250: continue
+    # Prendiamo solo i primi 5 per il debug veloce
+    debug_list = ticker_list[:5] 
+    st.write(f"🧪 Modalità Debug: test su {len(debug_list)} titoli.")
 
-            # Feature Engineering
-            df['MA21'] = ta.sma(df['Close'], length=21)
-            df['MA50'] = ta.sma(df['Close'], length=50)
-            df['MA200'] = ta.sma(df['Close'], length=200)
-            df['RSI'] = ta.rsi(df['Close'], length=14)
-            macd = ta.macd(df['Close'])
-            df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = macd.iloc[:,0], macd.iloc[:,1], macd.iloc[:,2]
-            df['T_open'] = df['Open'].pct_change() * 100
-            df['T_close'] = df['Close'].pct_change() * 100
-            df['T_min'] = df['Low'].pct_change() * 100
-            df['T_max'] = df['High'].pct_change() * 100
-            df['Ratio_MA21'] = df['Close'] / df['MA21']
-            df['Ratio_MA50'] = df['Close'] / df['MA50']
-            df['Ratio_MA200'] = df['Close'] / df['MA200']
-            df['Vol_Ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
-            df['Is_Quarter_End'] = df.index.is_quarter_end.astype(float)
-            df['Recent_Div'] = 0.0
-            df = df.join(vix_close.rename("VIX_Index"), how='left').ffill()
+    for idx, t in enumerate(debug_list):
+        # 1. Monitoraggio Ticker
+        prog_bar.progress((idx + 1) / len(debug_list), text=f"Analizzando {t}...")
+        
+        with st.status(f"Elaborazione {t}...", expanded=False) as status:
+            try:
+                # 2. Download Dati
+                st.write(f"Scaricando dati per {t}...")
+                df = yf.download(t.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
+                
+                if df.empty:
+                    st.write("⚠️ DataFrame VUOTO (Yahoo non ha risposto)")
+                    continue
+                
+                df = clean_columns(df)
+                st.write(f"Dati ottenuti: {len(df)} righe.")
 
-            df_in = df.dropna().tail(10).copy()
-            df_in['Lookback_Day'] = np.arange(1, 11).astype(float)
-            
-            input_tensor = torch.tensor(df_in[COLS_ORDER].values, dtype=torch.float32).unsqueeze(0)
+                if len(df) < 250:
+                    st.write(f"⚠️ Righe insufficienti ({len(df)} < 250)")
+                    continue
 
-            mc_preds = []
-            with torch.no_grad():
-                for _ in range(cycles):
-                    mc_preds.append(model(input_tensor).numpy())
-            
-            mc_preds = np.array(mc_preds)
-            p_max, p_min = np.mean(mc_preds[:,:,3]), np.mean(mc_preds[:,:,2])
-            conf = 1 / (1 + np.std(mc_preds[:,:,3]))
-            
-            results.append({'Ticker': t, 'EVI': conf * p_max, 'P_MAX': p_max, 'P_MIN': p_min, 'CONF': conf})
-        except: continue
-        prog_bar.progress((idx + 1) / len(ticker_list), text=f"Analisi {t}...")
+                # 3. Feature Engineering
+                st.write("Calcolo indicatori tecnici...")
+                # ... (qui tieni il tuo codice di calcolo MA21, RSI, ecc.) ...
+                
+                # 4. Controllo Input Modello
+                df_in = df.dropna().tail(10).copy()
+                st.write(f"Input model shape: {df_in[COLS_ORDER].shape}")
+                
+                input_tensor = torch.tensor(df_in[COLS_ORDER].values, dtype=torch.float32).unsqueeze(0)
+
+                # 5. Predizione
+                st.write(f"Esecuzione {cycles} cicli Monte Carlo...")
+                mc_preds = []
+                with torch.no_grad():
+                    for c in range(cycles):
+                        pred = model(input_tensor).numpy()
+                        mc_preds.append(pred)
+                
+                st.write("✅ Predizione completata.")
+                
+                # Calcoli finali...
+                mc_preds = np.array(mc_preds)
+                p_max, p_min = np.mean(mc_preds[:,:,3]), np.mean(mc_preds[:,:,2])
+                conf = 1 / (1 + np.std(mc_preds[:,:,3]))
+                
+                results.append({'Ticker': t, 'EVI': conf * p_max, 'P_MAX': p_max, 'P_MIN': p_min, 'CONF': conf})
+                status.update(label=f"✅ {t} Completato", state="complete")
+
+            except Exception as e:
+                st.error(f"❌ Errore critico su {t}: {e}")
+                status.update(label=f"❌ {t} Fallito", state="error")
+                continue
     
     return pd.DataFrame(results)
 
