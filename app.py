@@ -198,18 +198,18 @@ def fetch_and_predict(ticker_list, model, cycles):
             
         st.write(f"--- ✅ DEBUG END: {t} SUCCESS ---")
                 
-                # Calcoli finali...
-                mc_preds = np.array(mc_preds)
-                p_max, p_min = np.mean(mc_preds[:,:,3]), np.mean(mc_preds[:,:,2])
-                conf = 1 / (1 + np.std(mc_preds[:,:,3]))
-                
-                results.append({'Ticker': t, 'EVI': conf * p_max, 'P_MAX': p_max, 'P_MIN': p_min, 'CONF': conf})
-                status.update(label=f"✅ {t} Completato", state="complete")
+        # Calcoli finali...
+        mc_preds = np.array(mc_preds)
+        p_max, p_min = np.mean(mc_preds[:,:,3]), np.mean(mc_preds[:,:,2])
+        conf = 1 / (1 + np.std(mc_preds[:,:,3]))
+        
+        results.append({'Ticker': t, 'EVI': conf * p_max, 'P_MAX': p_max, 'P_MIN': p_min, 'CONF': conf})
+        status.update(label=f"✅ {t} Completato", state="complete")
 
-            except Exception as e:
-                st.error(f"❌ Errore critico su {t}: {e}")
-                status.update(label=f"❌ {t} Fallito", state="error")
-                continue
+    except Exception as e:
+        st.error(f"❌ Errore critico su {t}: {e}")
+        status.update(label=f"❌ {t} Fallito", state="error")
+        continue
     
     return pd.DataFrame(results)
 
