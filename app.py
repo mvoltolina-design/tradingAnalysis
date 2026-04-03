@@ -304,52 +304,46 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    st.header("📊 Il Tuo Portafoglio")
+   elif menu == "Portafoglio":
+    st.header("📊 Analisi Portafoglio Attivo")
     
-   # 1. Caricamento dati
-    df_port_raw = load_portfolio().copy()
+    # 1. Caricamento dati originale
+    df_port = load_portfolio().copy()
     
-    if df_port_raw.empty:
+    if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # 2. TRASFORMAZIONE MATEMATICA FORZATA
-        df_display = df_port_raw.copy()
+        # 2. IDENTIFICAZIONE COLONNE REALI
+        # Queste sono le 5 colonne che vuoi vedere come percentuali (es. 5.20%)
+        perc_targets = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
         
-        # Elenco esatto delle colonne da trasformare
-        cols_to_perc = ["max_Raggiunto%", "Min_raggiunto%", "Est_Max", "Est_Min", "Confidence"]
+        # Troviamo quali di queste sono effettivamente presenti nel tuo DataFrame
+        present_perc_cols = [c for c in perc_targets if c in df_port.columns]
         
-        for col in cols_to_perc:
-            if col in df_display.columns:
-                # Forza la conversione a float e moltiplica esplicitamente
-                df_display[col] = pd.to_numeric(df_display[col], errors='coerce').fillna(0.0)
-                # La moltiplicazione avviene qui
-                df_display[col] = df_display[col] * 100
+        # 3. TRASFORMAZIONE MATEMATICA (* 100)
+        for col in present_perc_cols:
+            # Forza la conversione a numero e moltiplica per 100
+            df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
 
-        # 3. VERIFICA DI DEBUG (opzionale, decommenta se vuoi vedere i numeri grezzi sopra la tabella)
-        st.write(df_display[cols_to_perc].head())
+        # 4. CONFIGURAZIONE DINAMICA
+        # Creiamo il dizionario di configurazione partendo da zero
+        conf_dinamica = {
+            "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+            "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f")
+        }
+        
+        # Aggiungiamo alla configurazione solo le percentuali che abbiamo trovato e moltiplicato
+        for col in present_perc_cols:
+            conf_dinamica[col] = st.column_config.NumberColumn(col, format="%.2f%%")
 
-        # 4. VISUALIZZAZIONE
+        # 5. VISUALIZZAZIONE
+        # Mostriamo il dataframe usando solo le colonne che esistono davvero
         st.dataframe(
-            df_display,
+            df_port,
             use_container_width=True,
             hide_index=True,
-            column_config={
-                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-                "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f"),
-                
-                # Ora che il numero è ad esempio 5.21, il format lo mostra come 5.21%
-                "max_Raggiunto%": st.column_config.NumberColumn("Max Ragg.", format="%.2f%%"),
-                "Min_raggiunto%": st.column_config.NumberColumn("Min Ragg.", format="%.2f%%"),
-                "Est_Max": st.column_config.NumberColumn("Est. Max", format="%.2f%%"),
-                "Est_Min": st.column_config.NumberColumn("Est. Min", format="%.2f%%"),
-                "Confidence": st.column_config.NumberColumn("Confidenza", format="%.2f%%"),
-                
-                "Stop_Loss": st.column_config.NumberColumn("S.L.", format="$ %.2f"),
-                "Target": st.column_config.NumberColumn("T.P.", format="$ %.2f"),
-                "Data": st.column_config.DatetimeColumn("Data", format="DD/MM/YY"),
-            }
+            column_config=conf_dinamica
         )
-
 
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
