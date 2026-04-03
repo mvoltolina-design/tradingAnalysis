@@ -312,17 +312,7 @@ if menu == "Dashboard Portafoglio":
     if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # --- KPI SUPERIORI ---
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Titoli Totali", len(df_port))
-        c2.metric("Mercato USA", "CHIUSO", "Venerdì Santo", delta_color="off")
-        c3.metric("Riapertura", "Lunedì 06/04")
-
-        # --- PRE-ELABORAZIONE PER PERCENTUALI ---
-        # Se i valori nel CSV sono decimali (es. 0.85), 
-        # la colonna 'Confidenza' verrà mostrata come 85.00% grazie al formatter.
-        # Se sono già interi (es. 85), rimuovi la necessità di calcoli extra.
-        
+        # --- DASHBOARD METRICHE ---
         st.dataframe(
             df_port,
             use_container_width=True,
@@ -330,40 +320,60 @@ if menu == "Dashboard Portafoglio":
             column_config={
                 "Ticker": st.column_config.TextColumn("Ticker", width="small"),
                 "Quantità": st.column_config.NumberColumn("Qty", width="small"),
-                "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f"),
-                "Stop_Loss": st.column_config.NumberColumn("S.L.", format="$ %.2f"),
-                "Target": st.column_config.NumberColumn("Target", format="$ %.2f"),
-                # Formattazione Percentuale per Confidenza (valore * 100)
-                "Confidenza": st.column_config.NumberColumn(
-                    "Conf AI", 
+                "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f"),
+                
+                # --- COLONNE IN PERCENTUALE (Formato: 0.0521 -> 5.21%) ---
+                "max_Raggiunto%": st.column_config.NumberColumn(
+                    "Max Raggiunto", 
                     format="%.2f%%", 
-                    help="Affidabilità calcolata dal modello V8"
+                    help="Massimo guadagno percentuale toccato dall'apertura"
                 ),
-                # Esempio per altre colonne in percentuale se presenti (es. Rendimento)
-                "Rendimento": st.column_config.NumberColumn("P/L %", format="%.2f%%"),
+                "Min_raggiunto%": st.column_config.NumberColumn(
+                    "Min Raggiunto", 
+                    format="%.2f%%", 
+                    help="Massimo drawdown percentuale toccato dall'apertura"
+                ),
+                "Est_Max": st.column_config.NumberColumn(
+                    "Est. Max %", 
+                    format="%.2f%%", 
+                    help="Stima Target Superiore del modello V8"
+                ),
+                "Est_Min": st.column_config.NumberColumn(
+                    "Est. Min %", 
+                    format="%.2f%%", 
+                    help="Stima Target Inferiore del modello V8"
+                ),
+                "Confidence": st.column_config.NumberColumn(
+                    "Confidenza", 
+                    format="%.2f%%", 
+                    help="Livello di affidabilità della previsione AI"
+                ),
+                
+                # --- ALTRE COLONNE ---
+                "Stop_Loss": st.column_config.NumberColumn("S.L.", format="$ %.2f"),
+                "Target": st.column_config.NumberColumn("T.P.", format="$ %.2f"),
                 "Data": st.column_config.DatetimeColumn("Data", format="DD/MM/YY"),
             }
         )
 
         st.divider()
         
-        # --- AZIONI DI GESTIONE ---
-        with st.expander("⚙️ Opzioni Avanzate"):
-            col_del, col_csv = st.columns(2)
+        # --- ESPORTAZIONE E CONTROLLO ---
+        with st.expander("⚙️ Gestione Dati"):
+            col1, col2 = st.columns(2)
             
-            # Export rapido del CSV originale
-            csv = df_port.to_csv(index=False).encode('utf-8')
-            col_csv.download_button(
-                label="📥 Esporta Portafoglio",
-                data=csv,
-                file_name='portafoglio_v8.csv',
-                mime='text/csv',
+            # Download veloce del CSV
+            csv_data = df_port.to_csv(index=False).encode('utf-8')
+            col1.download_button(
+                "📥 Esporta Portafoglio",
+                data=csv_data,
+                file_name="portafoglio_v8_export.csv",
+                mime="text/csv",
                 use_container_width=True
             )
             
-            if col_del.button("🗑️ Reset Totale Portafoglio", use_container_width=True):
-                st.error("Richiesta reset inviata (Simulazione).")
-
+            if col2.button("🗑️ Reset Log Operativo", use_container_width=True):
+                st.warning("Azione non disponibile in modalità sola lettura.")
         st.caption("Nota: I valori percentuali sono calcolati sulla base dei dati inseriti nel file di log.")
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
