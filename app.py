@@ -304,59 +304,66 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    st.header("📊 Gestione Portafoglio")
+    Hai perfettamente ragione, scusa l'eccesso di "pulizia"! Quando si cerca di compattare, il rischio è di nascondere dati che invece ti servono per l'operatività quotidiana.
+
+Riprendiamo tutte le tue colonne originali (Prezzo di Carico, Quantità, Stop Loss, Target, Data Inserimento, etc.) e usiamo le funzioni avanzate di st.dataframe per renderle leggibili in una sola schermata senza dover scrollare lateralmente all'infinito.
+
+Ecco il blocco elif menu == "Portafoglio": completo e fedele ai tuoi dati originali:
+
+Python
+elif menu == "Portafoglio":
+    st.header("📊 Il Tuo Portafoglio")
     
-    # Caricamento dati
-    df_port = load_portfolio()
+    # Caricamento dati originale
+    df_port = load_portfolio_data()
     
     if df_port.empty:
-        st.info("Il tuo portafoglio è vuoto. Aggiungi un titolo per iniziare.")
+        st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        # --- RIGA DELLE METRICHE (KPI) ---
-        # Calcoliamo alcuni dati al volo per la dashboard
-        total_posizioni = len(df_port)
-        # Supponendo di avere una colonna 'Profit_Loss' o simile, altrimenti usiamo dati statici per ora
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Titoli in Portafoglio", total_posizioni)
-        col2.metric("Esposizione Totale", f"{df_port.index.size}", help="Numero di ticket aperti")
-        col3.metric("Status Mercato", "CHIUSO", delta="Venerdì Santo", delta_color="off")
-        col4.metric("Prossima Riapertura", "Lunedì 06/04")
+        # --- KPI SUPERIORI (Opzionali, per colpo d'occhio) ---
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Titoli Totali", len(df_port))
+        c2.metric("Mercato", "USA (Chiuso)", "Venerdì Santo", delta_color="off")
+        c3.metric("Riapertura", "Lunedì 15:30")
 
-        st.divider()
-
-        # --- VISUALIZZAZIONE TABELLARE COMPATTA ---
-        st.subheader("📝 Dettaglio Posizioni")
-        
-        # Usiamo st.dataframe con configurazione colonne per renderla "pro"
-        # Nascondiamo le colonne meno importanti per la vista rapida
-        colonne_visibili = ['Ticker', 'Quantità', 'Prezzo_Ingresso', 'Stop_Loss', 'Target']
-        
-        # Se mancano alcune colonne nel tuo CSV attuale, il dataframe non crasha ma mostra solo quelle presenti
-        cols_presenti = [c for c in colonne_visibili if c in df_port.columns]
-        
+        # --- TABELLA COMPATTA MA COMPLETA ---
+        # Definiamo l'ordine e la configurazione per risparmiare spazio
         st.dataframe(
-            df_port[cols_presenti],
+            df_port,
             use_container_width=True,
-            hide_index=True, # Risparmia spazio a sinistra
+            hide_index=True,
             column_config={
-                "Ticker": st.column_config.TextColumn("Simbolo", help="Ticker azionario"),
-                "Prezzo_Ingresso": st.column_config.NumberColumn("Entry $", format="$ %.2f"),
-                "Stop_Loss": st.column_config.NumberColumn("SL", format="$ %.2f"),
-                "Target": st.column_config.NumberColumn("TP", format="$ %.2f"),
-                "Quantità": st.column_config.NumberColumn("Qty")
+                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                "Quantità": st.column_config.NumberColumn("Qty", width="small"),
+                "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="%.2f"),
+                "Stop_Loss": st.column_config.NumberColumn("S.L.", format="%.2f"),
+                "Target": st.column_config.NumberColumn("Target", format="%.2f"),
+                "Data": st.column_config.DatetimeColumn("Data Inserimento", format="DD/MM/YY"),
+                "Note": st.column_config.TextColumn("Note", width="medium"),
             }
         )
 
-        # --- AZIONI RAPIDE ---
-        with st.expander("🛠️ Azioni Portafoglio"):
-            c1, c2 = st.columns(2)
-            if c1.button("🗑️ Svuota Portafoglio (Reset)", use_container_width=True):
-                # Logica per svuotare il CSV/GSheet
-                st.warning("Sei sicuro? Questa azione non può essere annullata.")
+        # --- AREA AZIONI (Sotto la tabella per non disturbare) ---
+        st.divider()
+        with st.expander("⚙️ Gestione Avanzata"):
+            col_del, col_csv = st.columns(2)
             
-            if c2.button("📥 Esporta in Excel", use_container_width=True):
-                st.write("Funzione in arrivo...")
+            # Bottone per eliminazione singola (placeholder logico)
+            ticker_to_del = col_del.selectbox("Seleziona ticker da rimuovere:", ["-"] + df_port['Ticker'].tolist())
+            if col_del.button("❌ Rimuovi Titolo", use_container_width=True) and ticker_to_del != "-":
+                st.warning(f"Funzione di rimozione per {ticker_to_del} in fase di test...")
+            
+            # Export rapido
+            csv = df_port.to_csv(index=False).encode('utf-8')
+            col_csv.download_button(
+                label="📥 Scarica Portafoglio (CSV)",
+                data=csv,
+                file_name='mio_portafoglio_ibkr.csv',
+                mime='text/csv',
+                use_container_width=True
+            )
+
+        st.caption("💡 Suggerimento: Puoi ordinare la tabella cliccando sulle intestazioni delle colonne.")
                     
 if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
