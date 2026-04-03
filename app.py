@@ -89,20 +89,23 @@ def save_portfolio(df):
     conn.update(worksheet="Sheet1", data=df_to_save)
     st.cache_data.clear()
 
+@st.cache_data(ttl=3600) # 3600 secondi = 1 ora
 def load_analisi_data():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        df = conn.read(worksheet="candidati", ttl=0)
+        # Impostiamo il ttl della connessione a 1 ora
+        df = conn.read(worksheet="candidati", ttl=3600)
         
         if df is not None and not df.empty:
             # Pulizia automatica: rimuove spazi bianchi dai nomi delle colonne
             df.columns = [str(c).strip() for c in df.columns]
             return df
         
-        # Se il foglio è vuoto, restituiamo un DataFrame con le colonne giuste
+        # Se il foglio è vuoto o non esiste, restituiamo un DataFrame con le colonne giuste
         return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
-    except Exception as e:
-        return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
+    except Exception:
+        # In caso di errore (es. foglio mancante), restituiamo comunque la struttura
+        return pd.DataFrame(columns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])umns=['Ticker', 'P_MAX', 'P_MIN', 'CONF'])
 
 @st.cache_resource
 def load_v8_model():
@@ -449,26 +452,71 @@ if menu == "Aggiungi Titolo":
 
 elif menu == "Analisi V8":
     st.header("🎯 Analisi Predittiva V8")
-    model = load_v8_model()
     
-    if model and os.path.exists("tickers_SP500_2026.csv"):
-        t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+    # 1. Caricamento dati (sfrutta la cache di 1 ora definita in load_analisi_data)
+    df_analisi = load_analisi_data()
+    
+    # Verifichiamo se il DataFrame contiene dati reali (almeno una riga)
+    analisi_presente = not df_analisi.empty and len(df_analisi) > 0
+
+    if analisi_presente:
+        st.success("✅ Risultati dell'ultima analisi caricati (Validità 1h)")
         
-        if st.button("🚀 AVVIA ANALISI S&P 500"):
-            res = fetch_and_predict(t_list, model, 30)
+        # Mostriamo i risultati ordinati per EVI (il nostro indice di opportunità)
+        df_display = df_analisi.sort_values('EVI', ascending=False)
+        st.dataframe(df_display, use_container_width=True)
+        
+        st.divider()
+        st.subheader("Aggiornamento Dati")
+        st.write("Vuoi ignorare i dati in memoria e lanciare una nuova scansione di mercato?")
+    else:
+        st.warning("⚠️ Nessuna analisi recente trovata nel database 'candidati' o dati scaduti.")
+        st.info("L'analisi dello S&P 500 richiede circa 10-15 minuti. Assicurati di non chiudere la pagina.")
+
+    # 2. Pulsante di avvio analisi
+    # Se i dati esistono, il pulsante serve per il "Ricalcolo", altrimenti per il "Primo Avvio"
+    label_pulsante = "🔄 RICALCOLA ANALISI S&P 500" if analisi_presente else "🚀 AVVIA ANALISI S&P 500"
+    
+    if st.button(label_pulsante):
+        model = load_v8_model()
+        
+        # Controllo presenza file ticker
+        if not os.path.exists("tickers_SP500_2026.csv"):
+            st.error("❌ File 'tickers_SP500_2026.csv' non trovato. Impossibile procedere.")
+        elif model is None:
+            st.error("❌ Modello V8 (.pth) non caricato correttamente.")
+        else:
+            # Lettura lista ticker
+            t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+            
+            # Esecuzione Analisi (usiamo 10 cicli Monte Carlo per bilanciare precisione e velocità)
+            res = fetch_and_predict(t_list, model, 10)
             
             if not res.empty:
-                # --- NUOVA LOGICA DI SALVATAGGIO ---
-                st.subheader("Top Opportunità Rilevate")
+                st.subheader("Analisi Completata!")
                 res_sorted = res.sort_values('EVI', ascending=False)
                 st.dataframe(res_sorted, use_container_width=True)
                 
+                # --- SALVATAGGIO E PULIZIA CACHE ---
                 try:
                     conn = get_gsheet_connection()
-                    # Sovrascrive il tab 'candidati' con i nuovi risultati
+                    # Sovrascrive il tab 'candidati' con i nuovi dati
                     conn.update(worksheet="candidati", data=res_sorted)
-                    st.success("✅ Risultati analisi salvati nel tab 'candidati'!")
-                    # Puliamo la cache così il menu "Aggiungi Titolo" vede i nuovi dati
+                    
+                    # CRITICO: Puliamo la cache di Streamlit. 
+                    # Senza questo, load_analisi_data() continuerebbe a leggere i vecchi dati per 1 ora.
                     st.cache_data.clear()
+                    
+                    st.success("✅ Nuovi risultati salvati nel database 'candidati'!")
+                    st.balloons()
+                    
+                    # Ricarichiamo l'app per aggiornare lo stato della dashboard
+                    st.rerun()
                 except Exception as e:
-                    st.error(f"Errore durante il salvataggio dei candidati: {e}")
+                    st.error(f"❌ Errore durante il salvataggio su Google Sheets: {e}")
+            else:
+                st.error("❌ L'analisi non ha prodotto risultati. Controlla il log di debug.")
+
+    # 3. Footer informativo
+    if analisi_presente:
+        st.caption(f"Ultimo aggiornamento rilevato: {len(df_analisi)} titoli analizzati.")
