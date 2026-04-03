@@ -62,7 +62,7 @@ def get_gsheet_connection():
 def load_portfolio():
     try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-        df = conn.read(spreadsheet=SQL_URL, worksheet="Sheet1", ttl=0)
+        df = conn.read(worksheet="Sheet1", ttl=0)
         
         if df is None or df.empty:
             return pd.DataFrame(columns=COLONNE_PORTAFOGLIO)
