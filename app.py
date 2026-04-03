@@ -138,21 +138,56 @@ def fetch_and_predict(ticker_list, model, cycles):
 # --- 4. LOGICA PORTFOLIO ---
 def update_portfolio_metrics():
     df = load_portfolio()
-    active = df[df['Stato'] == 'OPEN'].index
-    if len(active) == 0: return df
+    if df.empty: return df
     
-    tickers = df.loc[active, 'Ticker'].unique().tolist()
-    data_bulk = yf.download([t.replace('.', '-') for t in tickers], period="1d", progress=False, auto_adjust=True)
+    # Pulizia preliminare: convertiamo le colonne numeriche e le date
+    for col in ['Prezzo_Carico', 'Max_Raggiunto', 'Min_Raggiunto']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    for idx in active:
-        t = df.at[idx, 'Ticker'].replace('.', '-')
+    # Assicuriamoci che Data_Acquisto sia in formato datetime per yfinance
+    df['Data_Acquisto'] = pd.to_datetime(df['Data_Acquisto'], errors='coerce')
+    
+    active_indices = df[df['Stato'] == 'OPEN'].index
+    if len(active_indices) == 0: return df
+
+    for idx in active_indices:
+        ticker = str(df.at[idx, 'Ticker']).replace('.', '-')
+        # Prendiamo la data d'acquisto e la formattiamo per la query API
+        start_date = df.at[idx, 'Data_Acquisto'].strftime('%Y-%m-%d')
+        prezzo_carico = float(df.at[idx, 'Prezzo_Carico'])
+
         try:
-            curr_p = float(data_bulk['Close'][t].iloc[-1]) if len(tickers) > 1 else float(data_bulk['Close'].iloc[-1])
-            if curr_p > df.at[idx, 'Max_Raggiunto']:
-                df.at[idx, 'Max_Raggiunto'], df.at[idx, 'Data_Max'] = curr_p, datetime.now().strftime("%d/%m %H:%M")
-            if curr_p < df.at[idx, 'Min_Raggiunto']:
-                df.at[idx, 'Min_Raggiunto'], df.at[idx, 'Data_Min'] = curr_p, datetime.now().strftime("%d/%m %H:%M")
-        except: continue
+            # Query storica: scarica TUTTI i giorni dal momento dell'acquisto ad oggi
+            h_data = yf.download(ticker, start=start_date, progress=False, auto_adjust=True)
+            
+            if h_data.empty:
+                continue
+                
+            h_data = clean_columns(h_data)
+
+            # Calcolo dei valori reali nel periodo (High e Low massimi/minimi)
+            real_max = float(h_data['High'].max())
+            real_min = float(h_data['Low'].min())
+            
+            # Troviamo le date esatte dei picchi
+            date_max_val = h_data['High'].idxmax().strftime("%Y-%m-%d")
+            date_min_val = h_data['Low'].idxmin().strftime("%Y-%m-%d")
+
+            # Scrittura forzata sul DataFrame (sovrascrive "In attesa")
+            df.at[idx, 'Max_Raggiunto'] = real_max
+            df.at[idx, 'Max_Raggiunto%'] = (real_max - prezzo_carico) / prezzo_carico
+            df.at[idx, 'Data_Max'] = date_max_val
+
+            df.at[idx, 'Min_Raggiunto'] = real_min
+            df.at[idx, 'Min_Raggiunto%'] = (real_min - prezzo_carico) / prezzo_carico
+            df.at[idx, 'Data_Min'] = date_min_val
+
+        except Exception as e:
+            st.error(f"Errore query storica per {ticker}: {e}")
+            continue
+    
+    # Ripristiniamo la data acquisto come stringa prima di salvare su Google
+    df['Data_Acquisto'] = df['Data_Acquisto'].dt.strftime('%Y-%m-%d')
     save_portfolio(df)
     return df
 
@@ -161,31 +196,59 @@ st.set_page_config(page_title="V8 Predictor", layout="wide")
 menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo", "Analisi V8"])
 
 if menu == "Dashboard Portafoglio":
-    st.header("📈 Portafoglio Attivo (Max/Min 5gg)")
-    df_p = update_portfolio_metrics()
-    if df_p[df_p['Stato'] == 'OPEN'].empty:
-        st.info("Nessun titolo attivo.")
+    st.header("📈 Portafoglio Attivo (Analisi Storica)")
+    
+    # 1. Esegue l'aggiornamento (scarica i dati da yfinance dal giorno d'acquisto)
+    with st.spinner("Sincronizzazione dati storici con Google Sheets..."):
+        df_p = update_portfolio_metrics()
+    
+    if df_p.empty or df_p[df_p['Stato'] == 'OPEN'].empty:
+        st.info("Nessun titolo attivo in portafoglio.")
     else:
-        for d in sorted(df_p[df_p['Stato'] == 'OPEN']['Data_Acquisto'].unique(), reverse=True):
+        # Ordiniamo per data di acquisto (più recenti in alto)
+        # Assicuriamoci che Data_Acquisto sia trattata come stringa per il raggruppamento
+        df_p['Data_Acquisto'] = df_p['Data_Acquisto'].astype(str)
+        dates = sorted(df_p[df_p['Stato'] == 'OPEN']['Data_Acquisto'].unique(), reverse=True)
+
+        for d in dates:
             with st.expander(f"📅 Acquisti del {d}", expanded=True):
                 sub = df_p[(df_p['Data_Acquisto'] == d) & (df_p['Stato'] == 'OPEN')]
+                
                 for i, row in sub.iterrows():
                     c1, c2, c3 = st.columns([1.2, 2, 2])
-                    c1.subheader(row['Ticker'])
-                    c1.caption(f"Carico: ${row['Prezzo_Carico']:.2f}")
                     
-                    m_p = ((row['Max_Raggiunto'] - row['Prezzo_Carico']) / row['Prezzo_Carico']) * 100
-                    c2.write(f"🚀 **Max: ${row['Max_Raggiunto']:.2f}** ({m_p:+.2f}%)")
-                    c2.caption(f"🕒 {row['Data_Max']}")
+                    # --- COLONNA 1: INFO TITOLO ---
+                    with c1:
+                        st.subheader(row['Ticker'])
+                        st.caption(f"Carico: ${float(row['Prezzo_Carico']):.2f}")
                     
-                    mi_p = ((row['Min_Raggiunto'] - row['Prezzo_Carico']) / row['Prezzo_Carico']) * 100
-                    c3.write(f"⚠️ **Min: ${row['Min_Raggiunto']:.2f}** ({mi_p:+.2f}%)")
-                    c3.caption(f"🕒 {row['Data_Min']}")
+                    # --- COLONNA 2: MASSIMO STORICO ---
+                    with c2:
+                        # Usiamo i valori già calcolati da update_portfolio_metrics
+                        max_val = float(row['Max_Raggiunto'])
+                        # Moltiplichiamo per 100 se nel foglio sono decimali (es. 0.08 -> 8%)
+                        max_perc = float(row['Max_Raggiunto%']) * 100
+                        
+                        st.write(f"🚀 **Max: ${max_val:.2f}**")
+                        st.write(f"({max_perc:+.2f}%)")
+                        st.caption(f"🕒 {row['Data_Max']}")
                     
-                    if st.button(f"Chiudi {row['Ticker']}", key=f"cl_{i}"):
+                    # --- COLONNA 3: MINIMO STORICO ---
+                    with c3:
+                        min_val = float(row['Min_Raggiunto'])
+                        min_perc = float(row['Min_Raggiunto%']) * 100
+                        
+                        st.write(f"⚠️ **Min: ${min_val:.2f}**")
+                        st.write(f"({min_perc:+.2f}%)")
+                        st.caption(f"🕒 {row['Data_Min']}")
+                    
+                    # --- AZIONI ---
+                    if st.button(f"Chiudi Posizione {row['Ticker']}", key=f"cl_{i}"):
                         df_p.at[i, 'Stato'] = 'CLOSED'
                         save_portfolio(df_p)
+                        st.success(f"Posizione su {row['Ticker']} chiusa!")
                         st.rerun()
+                    
                     st.divider()
 
 elif menu == "Aggiungi Titolo":
