@@ -110,7 +110,7 @@ def load_analisi_data():
 @st.cache_resource
 def load_v8_model():
     #path = "transformer_v8_epoch09.pth"
-    path = "transformer_v8.1_refine_epoch2.pth"
+    path = "transformer_v8.1_refine_epoch8.pth"
     if os.path.exists(path):
         m = IrisTransformer(num_layers=4)
         m.load_state_dict(torch.load(path, map_location="cpu"))
