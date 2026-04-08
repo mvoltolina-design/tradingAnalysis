@@ -319,33 +319,49 @@ if menu == "Dashboard Portafoglio":
         # --- LOGICA DI AGGIORNAMENTO DINAMICO ---
         st.write("🔄 Aggiornamento massimi/minimi in corso...")
         
-        for index, row in df_port.iterrows():
-            if row['Stato'] == 'OPEN':
-                try:
-                    ticker = row['Ticker']
-                    # Prendiamo i dati dall'acquisto a oggi
-                    start_date = row['Data_Acquisto']
-                    data_yf = yf.download(ticker, start=start_date, progress=False)
-                    
-                    if not data_yf.empty:
-                        # Calcoliamo i nuovi estremi
-                        new_max = float(data_yf['High'].max())
-                        new_min = float(data_yf['Low'].min())
-                        data_max = data_yf['High'].idxmax().strftime('%Y-%m-%d')
-                        data_min = data_yf['Low'].idxmin().strftime('%Y-%m-%d')
-                        
-                        # Aggiorniamo il DataFrame locale
-                        df_port.at[index, 'Max_Assoluto'] = new_max
-                        df_port.at[index, 'Min_Raggiunto'] = new_min
-                        df_port.at[index, 'Data_Max'] = data_max
-                        df_port.at[index, 'Data_Min'] = data_min
-                        
-                        # Calcolo percentuali
-                        prezzo_carico = float(row['Prezzo_Carico'])
-                        df_port.at[index, 'Max_Raggiunto%'] = (new_max - prezzo_carico) / prezzo_carico
-                        df_port.at[index, 'Min_Raggiunto%'] = (new_min - prezzo_carico) / prezzo_carico
-                except Exception as e:
-                    st.warning(f"Impossibile aggiornare {row['Ticker']}: {e}")
+        # --- LOGICA DI AGGIORNAMENTO DINAMICO CORRETTA ---
+for index, row in df_port.iterrows():
+    if row['Stato'] == 'OPEN':
+        try:
+            ticker = str(row['Ticker']).strip()
+            start_date = row['Data_Acquisto']
+            
+            # Scarichiamo i dati
+            data_yf = yf.download(ticker, start=start_date, progress=False)
+            
+            if not data_yf.empty:
+                # 1. Estraiamo i valori massimi e minimi assicurandoci che siano scalari
+                # Usiamo .max() e poi .item() o float() sull'ultimo valore della serie
+                raw_max = data_yf['High'].max()
+                raw_min = data_yf['Low'].min()
+                
+                # Se yfinance restituisce una Series (multi-index), prendiamo il primo valore
+                val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
+                val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
+                
+                # 2. Troviamo le date (gestendo il possibile multi-index delle colonne)
+                # .idxmax() restituisce l'indice (la data) del valore massimo
+                idx_max = data_yf['High'].idxmax()
+                idx_min = data_yf['Low'].idxmax() # correggo logica: idxmin() per il minimo
+                
+                # Se l'indice è una tupla (Ticker, Data), prendiamo solo la data
+                date_max = idx_max[0] if isinstance(idx_max, tuple) else idx_max
+                date_min = idx_min[0] if isinstance(idx_min, tuple) else idx_min
+
+                # 3. AGGIORNAMENTO DATAFRAME
+                df_port.at[index, 'Max_Assoluto'] = val_max
+                df_port.at[index, 'Min_Raggiunto'] = val_min
+                df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
+                df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
+                
+                # 4. CALCOLO PERCENTUALI
+                prezzo_carico = float(row['Prezzo_Carico'])
+                if prezzo_carico > 0:
+                    df_port.at[index, 'Max_Raggiunto%'] = (val_max - prezzo_carico) / prezzo_carico
+                    df_port.at[index, 'Min_Raggiunto%'] = (val_min - prezzo_carico) / prezzo_carico
+
+        except Exception as e:
+            st.warning(f"⚠️ Errore tecnico su {ticker}: {str(e)}")
 
         # 2. IDENTIFICAZIONE COLONNE PERCENTUALI (La logica che abbiamo scritto prima)
         target_perc = ["Est_Max", "Est_Min", "Confidence", "Max_Raggiunto%", "Min_Raggiunto%"]
