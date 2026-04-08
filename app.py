@@ -396,7 +396,7 @@ if menu == "Dashboard Portafoglio":
 # ==========================================
 # 2. SEZIONE AGGIUNGI TITOLO (Mancava questa riga!)
 # ==========================================
-elif menu == "Aggiungi Titolo":
+if menu == "Aggiungi Titolo":
     st.header("🆕 Inserimento Nuova Posizione")
     df_analisi = load_analisi_data()
     
@@ -466,7 +466,7 @@ elif menu == "Aggiungi Titolo":
 # ==========================================
 # 3. SEZIONE ANALISI V8
 # ==========================================
-elif menu == "Analisi V8":
+if menu == "Analisi V8":
     st.header("🎯 Analisi Predittiva V8")
     df_analisi = load_analisi_data()
     analisi_presente = not df_analisi.empty and len(df_analisi) > 0
