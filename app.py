@@ -307,15 +307,48 @@ menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo",
 # ==========================================
 # 1. SEZIONE DASHBOARD
 # ==========================================
-if menu == "Dashboard Portafoglio":
+elif menu == "Dashboard Portafoglio":
     st.header("📊 Analisi Portafoglio Attivo")
     
+    # 1. Caricamento dati
     df_port = load_portfolio().copy()
     
     if df_port.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
-        target_perc = ["Est_Max", "Est_Min", "Confidence"]
+        # --- LOGICA DI AGGIORNAMENTO DINAMICO ---
+        st.write("🔄 Aggiornamento massimi/minimi in corso...")
+        
+        for index, row in df_port.iterrows():
+            if row['Stato'] == 'OPEN':
+                try:
+                    ticker = row['Ticker']
+                    # Prendiamo i dati dall'acquisto a oggi
+                    start_date = row['Data_Acquisto']
+                    data_yf = yf.download(ticker, start=start_date, progress=False)
+                    
+                    if not data_yf.empty:
+                        # Calcoliamo i nuovi estremi
+                        new_max = float(data_yf['High'].max())
+                        new_min = float(data_yf['Low'].min())
+                        data_max = data_yf['High'].idxmax().strftime('%Y-%m-%d')
+                        data_min = data_yf['Low'].idxmin().strftime('%Y-%m-%d')
+                        
+                        # Aggiorniamo il DataFrame locale
+                        df_port.at[index, 'Max_Assoluto'] = new_max
+                        df_port.at[index, 'Min_Raggiunto'] = new_min
+                        df_port.at[index, 'Data_Max'] = data_max
+                        df_port.at[index, 'Data_Min'] = data_min
+                        
+                        # Calcolo percentuali
+                        prezzo_carico = float(row['Prezzo_Carico'])
+                        df_port.at[index, 'Max_Raggiunto%'] = (new_max - prezzo_carico) / prezzo_carico
+                        df_port.at[index, 'Min_Raggiunto%'] = (new_min - prezzo_carico) / prezzo_carico
+                except Exception as e:
+                    st.warning(f"Impossibile aggiornare {row['Ticker']}: {e}")
+
+        # 2. IDENTIFICAZIONE COLONNE PERCENTUALI (La logica che abbiamo scritto prima)
+        target_perc = ["Est_Max", "Est_Min", "Confidence", "Max_Raggiunto%", "Min_Raggiunto%"]
         found_to_multiply = []
 
         for col in df_port.columns:
@@ -324,24 +357,25 @@ if menu == "Dashboard Portafoglio":
                 try:
                     df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
                     found_to_multiply.append(col)
-                except:
-                    continue
+                except: continue
 
+        # 3. VISUALIZZAZIONE
         config_visuale = {
             "Ticker": st.column_config.TextColumn("Ticker", width="small"),
-            "Prezzo_Ingresso": st.column_config.NumberColumn("Ingresso $", format="$ %.2f"),
-            "Max_Raggiunto": st.column_config.NumberColumn("Max Assoluto", format="$ %.2f"),
+            "Prezzo_Carico": st.column_config.NumberColumn("Carico $", format="$ %.2f"),
+            "Max_Assoluto": st.column_config.NumberColumn("Max Assoluto", format="$ %.2f"),
+            "Min_Raggiunto": st.column_config.NumberColumn("Min Assoluto", format="$ %.2f"),
         }
-        
         for col in found_to_multiply:
             config_visuale[col] = st.column_config.NumberColumn(col, format="%.2f%%")
 
-        st.dataframe(
-            df_port,
-            use_container_width=True,
-            hide_index=True,
-            column_config=config_visuale
-        )
+        st.dataframe(df_port, use_container_width=True, hide_index=True, column_config=config_visuale)
+        
+        # Opzionale: Pulsante per salvare questi aggiornamenti sul database
+        if st.button("💾 Salva aggiornamenti su Database"):
+            save_portfolio(df_port)
+            st.success("Database aggiornato con i nuovi massimi/minimi!")
+            
 
 # ==========================================
 # 2. SEZIONE AGGIUNGI TITOLO (Mancava questa riga!)
