@@ -329,38 +329,38 @@ if menu == "Dashboard Portafoglio":
                     data_yf = yf.download(ticker, start=start_date, progress=False)
                     
                     if not data_yf.empty:
-                    # 1. Estrazione Valori (Max/Min)
-                    raw_max = data_yf['High'].max()
-                    raw_min = data_yf['Low'].min()
-                    
-                    val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
-                    val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
-                    
-                    # 2. Estrazione Date (Punto critico per l'errore strftime)
-                    idx_max_raw = data_yf['High'].idxmax()
-                    idx_min_raw = data_yf['Low'].idxmin()
-                    
-                    # Se è una Series, prendi il primo valore. Se è una tupla (Ticker, Data), prendi la data.
-                    def extract_date(val):
-                        if hasattr(val, 'iloc'): val = val.iloc[0] # Gestisce Series
-                        if isinstance(val, tuple): val = val[1]    # Gestisce MultiIndex (Ticker, Date)
-                        return val
-
-                    date_max = extract_date(idx_max_raw)
-                    date_min = extract_date(idx_min_raw)
+                        # 1. Estrazione Valori (Max/Min)
+                        raw_max = data_yf['High'].max()
+                        raw_min = data_yf['Low'].min()
+                        
+                        val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
+                        val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
+                        
+                        # 2. Estrazione Date (Punto critico per l'errore strftime)
+                        idx_max_raw = data_yf['High'].idxmax()
+                        idx_min_raw = data_yf['Low'].idxmin()
+                        
+                        # Se è una Series, prendi il primo valore. Se è una tupla (Ticker, Data), prendi la data.
+                        def extract_date(val):
+                            if hasattr(val, 'iloc'): val = val.iloc[0] # Gestisce Series
+                            if isinstance(val, tuple): val = val[1]    # Gestisce MultiIndex (Ticker, Date)
+                            return val
     
-                    # 3. Aggiornamento con controllo tipo
-                    df_port.at[index, 'Max_Assoluto'] = val_max
-                    df_port.at[index, 'Min_Raggiunto'] = val_min
-                    
-                    # Ora strftime funzionerà perché date_max è sicuramente un oggetto Timestamp/Datetime
-                    try:
-                        df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
-                        df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
-                    except AttributeError:
-                        # Fallback se è già una stringa o altro tipo
-                        df_port.at[index, 'Data_Max'] = str(date_max)[:10]
-                        df_port.at[index, 'Data_Min'] = str(date_min)[:10]
+                        date_max = extract_date(idx_max_raw)
+                        date_min = extract_date(idx_min_raw)
+        
+                        # 3. Aggiornamento con controllo tipo
+                        df_port.at[index, 'Max_Assoluto'] = val_max
+                        df_port.at[index, 'Min_Raggiunto'] = val_min
+                        
+                        # Ora strftime funzionerà perché date_max è sicuramente un oggetto Timestamp/Datetime
+                        try:
+                            df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
+                            df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
+                        except AttributeError:
+                            # Fallback se è già una stringa o altro tipo
+                            df_port.at[index, 'Data_Max'] = str(date_max)[:10]
+                            df_port.at[index, 'Data_Min'] = str(date_min)[:10]
 
         
         # 2. IDENTIFICAZIONE COLONNE PERCENTUALI PER VISUALIZZAZIONE
