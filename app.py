@@ -460,6 +460,9 @@ elif menu == "Aggiungi Titolo":
             
             if st.form_submit_button("Conferma Acquisto"):
                 df_p = load_portfolio() 
+                
+                # Applichiamo la divisione per 100 ai valori inseriti nel form
+                # prima di creare il dizionario della nuova riga
                 new_row = {
                     'Ticker': t_in,
                     'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
@@ -469,12 +472,16 @@ elif menu == "Aggiungi Titolo":
                     'Min_Raggiunto': entry_price,
                     'Min_Raggiunto%': 0.0,
                     'Stato': 'OPEN',
-                    'Est_Max': est_max, 'Est_Min': est_min, 'Confidence': conf
+                    # Dividi i valori del form per 100 per salvarli come decimali
+                    'Est_Max': est_max / 100, 
+                    'Est_Min': est_min / 100, 
+                    'Confidence': float(conf) / 100 if conf.replace('.','',1).isdigit() else 0.0
                 }
+                
                 df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
                 save_portfolio(df_p)
                 st.balloons()
-                st.success(f"Posizione su {t_in} salvata!")
+                st.success(f"Posizione su {t_in} salvata con target decimalizzati!")
 
 # ==========================================
 # 3. SEZIONE ANALISI V8
