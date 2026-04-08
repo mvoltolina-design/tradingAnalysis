@@ -329,35 +329,40 @@ if menu == "Dashboard Portafoglio":
                     data_yf = yf.download(ticker, start=start_date, progress=False)
                     
                     if not data_yf.empty:
-                        # Estrazione robusta dei valori (gestisce anche MultiIndex)
-                        raw_max = data_yf['High'].max()
-                        raw_min = data_yf['Low'].min()
-                        
-                        val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
-                        val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
-                        
-                        # Troviamo le date dei picchi
-                        idx_max = data_yf['High'].idxmax()
-                        idx_min = data_yf['Low'].idxmin() # idxmin per il minimo assoluto
-                        
-                        date_max = idx_max[0] if isinstance(idx_max, tuple) else idx_max
-                        date_min = idx_min[0] if isinstance(idx_min, tuple) else idx_min
-        
-                        # Aggiornamento DataFrame locale
-                        df_port.at[index, 'Max_Assoluto'] = val_max
-                        df_port.at[index, 'Min_Raggiunto'] = val_min
+                    # 1. Estrazione Valori (Max/Min)
+                    raw_max = data_yf['High'].max()
+                    raw_min = data_yf['Low'].min()
+                    
+                    val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
+                    val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
+                    
+                    # 2. Estrazione Date (Punto critico per l'errore strftime)
+                    idx_max_raw = data_yf['High'].idxmax()
+                    idx_min_raw = data_yf['Low'].idxmin()
+                    
+                    # Se è una Series, prendi il primo valore. Se è una tupla (Ticker, Data), prendi la data.
+                    def extract_date(val):
+                        if hasattr(val, 'iloc'): val = val.iloc[0] # Gestisce Series
+                        if isinstance(val, tuple): val = val[1]    # Gestisce MultiIndex (Ticker, Date)
+                        return val
+
+                    date_max = extract_date(idx_max_raw)
+                    date_min = extract_date(idx_min_raw)
+    
+                    # 3. Aggiornamento con controllo tipo
+                    df_port.at[index, 'Max_Assoluto'] = val_max
+                    df_port.at[index, 'Min_Raggiunto'] = val_min
+                    
+                    # Ora strftime funzionerà perché date_max è sicuramente un oggetto Timestamp/Datetime
+                    try:
                         df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
                         df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
-                        
-                        # Calcolo percentuali basate sul carico
-                        prezzo_carico = float(row['Prezzo_Carico'])
-                        if prezzo_carico > 0:
-                            df_port.at[index, 'Max_Raggiunto%'] = (val_max - prezzo_carico) / prezzo_carico
-                            df_port.at[index, 'Min_Raggiunto%'] = (val_min - prezzo_carico) / prezzo_carico
-        
-                except Exception as e:
-                    st.warning(f"⚠️ Non riesco ad aggiornare {row.get('Ticker', 'N/D')}: {str(e)}")
+                    except AttributeError:
+                        # Fallback se è già una stringa o altro tipo
+                        df_port.at[index, 'Data_Max'] = str(date_max)[:10]
+                        df_port.at[index, 'Data_Min'] = str(date_min)[:10]
 
+        
         # 2. IDENTIFICAZIONE COLONNE PERCENTUALI PER VISUALIZZAZIONE
         target_perc = ["Est_Max", "Est_Min", "Confidence", "Max_Raggiunto%", "Min_Raggiunto%"]
         found_to_multiply = []
