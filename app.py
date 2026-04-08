@@ -307,7 +307,7 @@ menu = st.sidebar.selectbox("Menu", ["Dashboard Portafoglio", "Aggiungi Titolo",
 # ==========================================
 # 1. SEZIONE DASHBOARD
 # ==========================================
-elif menu == "Dashboard Portafoglio":
+if menu == "Dashboard Portafoglio":
     st.header("📊 Analisi Portafoglio Attivo")
     
     # 1. Caricamento dati
