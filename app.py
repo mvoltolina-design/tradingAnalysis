@@ -361,7 +361,8 @@ if menu == "Dashboard Portafoglio":
                             # Fallback se è già una stringa o altro tipo
                             df_port.at[index, 'Data_Max'] = str(date_max)[:10]
                             df_port.at[index, 'Data_Min'] = str(date_min)[:10]
-
+                    except Exception as e:
+                    st.warning(f"⚠️ Errore tecnico su {ticker}: {str(e)}")
         
         # 2. IDENTIFICAZIONE COLONNE PERCENTUALI PER VISUALIZZAZIONE
         target_perc = ["Est_Max", "Est_Min", "Confidence", "Max_Raggiunto%", "Min_Raggiunto%"]
