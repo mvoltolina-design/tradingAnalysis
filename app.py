@@ -494,7 +494,7 @@ elif menu == "Analisi V8":
     
     if not df_analisi.empty:
         st.success(f"✅ Ultima analisi caricata ({len(df_analisi)} titoli)")
-        # Mostriamo i top per EVI
+        # Ordiniamo per EVI per vedere i migliori candidati
         df_display = df_analisi.sort_values('EVI', ascending=False)
         st.dataframe(df_display, use_container_width=True, hide_index=True)
     else:
@@ -502,7 +502,7 @@ elif menu == "Analisi V8":
 
     # Pulsante di attivazione
     if st.button("🚀 AVVIA ANALISI S&P 500", key="run_analysis_v8"):
-        with st.spinner("Caricamento modello e dati in corso..."):
+        with st.spinner("Caricamento modello e scaricamento dati S&P 500..."):
             # 1. Caricamento Modello
             model = load_v8_model()
             
@@ -512,28 +512,29 @@ elif menu == "Analisi V8":
                 st.error("❌ File 'tickers_SP500_2026.csv' non trovato.")
             else:
                 try:
-                    # 2. Lettura lista ticker
+                    # 2. Lettura lista ticker dal tuo CSV
                     t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
-                    st.info(f"Analisi avviata su {len(t_list)} titoli... Attendere.")
+                    st.info(f"Analisi avviata su {len(t_list)} titoli... Attendere circa 2-3 minuti.")
                     
-                    # 3. Esecuzione Predizione (Monte Carlo)
-                    # Usiamo n_iterations=30 per avere una CONF robusta
-                    res = fetch_and_predict(t_list, model, n_iterations=30)
+                    # 3. Esecuzione Predizione (Usiamo 'cycles' come definito nella tua funzione)
+                    res = fetch_and_predict(t_list, model, cycles=30)
                     
                     if not res.empty:
-                        # Ordiniamo per EVI (Expected Value Index)
+                        # Ordiniamo i risultati
                         res_sorted = res.sort_values('EVI', ascending=False)
                         
-                        # 4. Salvataggio su Google Sheets
-                        conn = get_gsheet_connection()
-                        # 'candidati' è il nome del worksheet che abbiamo concordato
-                        conn.update(worksheet="candidati", data=res_sorted)
-                        
-                        st.success("✅ Analisi completata e salvata su Google Sheets!")
-                        st.cache_data.clear() # Pulisce la cache per mostrare i nuovi dati
-                        st.rerun() # Ricarica la pagina per aggiornare la tabella
+                        # 4. Salvataggio su Google Sheets nel worksheet 'candidati'
+                        try:
+                            conn = get_gsheet_connection()
+                            conn.update(worksheet="candidati", data=res_sorted)
+                            
+                            st.success("✅ Analisi completata e salvata su Google Sheets!")
+                            st.cache_data.clear() # Fondamentale per vedere i nuovi dati
+                            st.rerun() 
+                        except Exception as ge:
+                            st.error(f"❌ Errore durante il salvataggio su GSheet: {ge}")
                     else:
-                        st.error("❌ L'analisi non ha prodotto risultati. Controlla la connessione a yfinance.")
+                        st.error("❌ L'analisi non ha prodotto risultati. Verifica i log o la connessione yfinance.")
                         
                 except Exception as e:
-                    st.error(f"❌ Errore durante l'analisi: {str(e)}")
+                    st.error(f"❌ Errore critico durante l'analisi: {str(e)}")
