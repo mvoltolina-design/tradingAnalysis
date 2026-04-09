@@ -488,12 +488,52 @@ elif menu == "Aggiungi Titolo":
 # ==========================================
 elif menu == "Analisi V8":
     st.header("🎯 Analisi Predittiva V8")
+    
+    # Caricamento dati esistenti per visualizzazione immediata
     df_analisi = load_analisi_data()
     
     if not df_analisi.empty:
-        st.success("✅ Risultati dell'ultima analisi caricati")
-        st.dataframe(df_analisi.sort_values('EVI', ascending=False), use_container_width=True)
-    
-    if st.button("🔄 RICALCOLA ANALISI S&P 500", key="run_analysis_v8"):
-        # ... (tua logica di analisi esistente)
-        pass
+        st.success(f"✅ Ultima analisi caricata ({len(df_analisi)} titoli)")
+        # Mostriamo i top per EVI
+        df_display = df_analisi.sort_values('EVI', ascending=False)
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+    else:
+        st.warning("⚠️ Nessuna analisi recente trovata. Avvia un ricalcolo.")
+
+    # Pulsante di attivazione
+    if st.button("🚀 AVVIA ANALISI S&P 500", key="run_analysis_v8"):
+        with st.spinner("Caricamento modello e dati in corso..."):
+            # 1. Caricamento Modello
+            model = load_v8_model()
+            
+            if model is None:
+                st.error("❌ Impossibile caricare il modello Transformer.")
+            elif not os.path.exists("tickers_SP500_2026.csv"):
+                st.error("❌ File 'tickers_SP500_2026.csv' non trovato.")
+            else:
+                try:
+                    # 2. Lettura lista ticker
+                    t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+                    st.info(f"Analisi avviata su {len(t_list)} titoli... Attendere.")
+                    
+                    # 3. Esecuzione Predizione (Monte Carlo)
+                    # Usiamo n_iterations=30 per avere una CONF robusta
+                    res = fetch_and_predict(t_list, model, n_iterations=30)
+                    
+                    if not res.empty:
+                        # Ordiniamo per EVI (Expected Value Index)
+                        res_sorted = res.sort_values('EVI', ascending=False)
+                        
+                        # 4. Salvataggio su Google Sheets
+                        conn = get_gsheet_connection()
+                        # 'candidati' è il nome del worksheet che abbiamo concordato
+                        conn.update(worksheet="candidati", data=res_sorted)
+                        
+                        st.success("✅ Analisi completata e salvata su Google Sheets!")
+                        st.cache_data.clear() # Pulisce la cache per mostrare i nuovi dati
+                        st.rerun() # Ricarica la pagina per aggiornare la tabella
+                    else:
+                        st.error("❌ L'analisi non ha prodotto risultati. Controlla la connessione a yfinance.")
+                        
+                except Exception as e:
+                    st.error(f"❌ Errore durante l'analisi: {str(e)}")
