@@ -311,63 +311,74 @@ if menu == "Dashboard Portafoglio":
     st.header("📊 Analisi Portafoglio Attivo")
     
     # 1. Caricamento dati
-    df_port = load_portfolio().copy()
+    df_port_raw = load_portfolio().copy()
     
-    if df_port.empty:
+    if df_port_raw.empty:
         st.info("📭 Il portafoglio è attualmente vuoto.")
     else:
+        # --- FILTRO STATO ---
+        # Inseriamo un selettore per filtrare i titoli
+        filtro_stato = st.radio("Filtra per stato:", ["Solo OPEN", "Solo CLOSE", "Tutti"], horizontal=True)
+        
+        if filtro_stato == "Solo OPEN":
+            df_port = df_port_raw[df_port_raw['Stato'] == 'OPEN'].copy()
+        elif filtro_stato == "Solo CLOSE":
+            df_port = df_port_raw[df_port_raw['Stato'] == 'CLOSE'].copy()
+        else:
+            df_port = df_port_raw.copy()
+
         # --- LOGICA DI AGGIORNAMENTO DINAMICO ---
-        st.write("🔄 Aggiornamento massimi/minimi in corso...")
+        # Aggiorniamo i prezzi solo se ci sono titoli OPEN nella vista attuale
+        titoli_open = df_port[df_port['Stato'] == 'OPEN']
         
-        def extract_date(val):
-            if hasattr(val, 'iloc'): val = val.iloc[0]
-            if isinstance(val, tuple): val = val[1]
-            return val
+        if not titoli_open.empty:
+            st.write("🔄 Aggiornamento massimi/minimi in corso per i titoli OPEN...")
+            
+            def extract_date(val):
+                if hasattr(val, 'iloc'): val = val.iloc[0]
+                if isinstance(val, tuple): val = val[1]
+                return val
 
-        for index, row in df_port.iterrows():
-            if row['Stato'] == 'OPEN':
-                try:
-                    ticker = str(row['Ticker']).strip()
-                    start_date = row['Data_Acquisto']
-                    
-                    data_yf = yf.download(ticker, start=start_date, progress=False)
-                    
-                    if not data_yf.empty:
-                        # Recupero il valore massimo e minimo (prezzi in dollari)
-                        raw_max = data_yf['High'].max()
-                        raw_min = data_yf['Low'].min()
+            for index, row in df_port.iterrows():
+                if row['Stato'] == 'OPEN':
+                    try:
+                        ticker = str(row['Ticker']).strip()
+                        start_date = row['Data_Acquisto']
                         
-                        val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
-                        val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
+                        data_yf = yf.download(ticker, start=start_date, progress=False)
                         
-                        # Recupero le date corrispondenti
-                        idx_max_raw = data_yf['High'].idxmax()
-                        idx_min_raw = data_yf['Low'].idxmin()
-                        
-                        date_max = extract_date(idx_max_raw)
-                        date_min = extract_date(idx_min_raw)
-        
-                        # --- AGGIORNAMENTO COLONNE ORIGINALI ---
-                        df_port.at[index, 'Max_Raggiunto'] = val_max  # Valore in $
-                        df_port.at[index, 'Min_Raggiunto'] = val_min  # Valore in $
-                        
-                        try:
-                            df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
-                            df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
-                        except:
-                            df_port.at[index, 'Data_Max'] = str(date_max)[:10]
-                            df_port.at[index, 'Data_Min'] = str(date_min)[:10]
-                        
-                        # Calcolo della performance percentuale
-                        prezzo_carico = float(row['Prezzo_Carico'])
-                        if prezzo_carico > 0:
-                            df_port.at[index, 'Max_Raggiunto%'] = (val_max - prezzo_carico) / prezzo_carico
-                            df_port.at[index, 'Min_Raggiunto%'] = (val_min - prezzo_carico) / prezzo_carico
-        
-                except Exception as e:
-                    st.warning(f"⚠️ Errore aggiornamento {row.get('Ticker', 'N/D')}: {str(e)}")
+                        if not data_yf.empty:
+                            raw_max = data_yf['High'].max()
+                            raw_min = data_yf['Low'].min()
+                            
+                            val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
+                            val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
+                            
+                            idx_max_raw = data_yf['High'].idxmax()
+                            idx_min_raw = data_yf['Low'].idxmin()
+                            
+                            date_max = extract_date(idx_max_raw)
+                            date_min = extract_date(idx_min_raw)
+            
+                            df_port.at[index, 'Max_Raggiunto'] = val_max
+                            df_port.at[index, 'Min_Raggiunto'] = val_min
+                            
+                            try:
+                                df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
+                                df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
+                            except:
+                                df_port.at[index, 'Data_Max'] = str(date_max)[:10]
+                                df_port.at[index, 'Data_Min'] = str(date_min)[:10]
+                            
+                            prezzo_carico = float(row['Prezzo_Carico'])
+                            if prezzo_carico > 0:
+                                df_port.at[index, 'Max_Raggiunto%'] = (val_max - prezzo_carico) / prezzo_carico
+                                df_port.at[index, 'Min_Raggiunto%'] = (val_min - prezzo_carico) / prezzo_carico
+            
+                    except Exception as e:
+                        st.warning(f"⚠️ Errore aggiornamento {row.get('Ticker', 'N/D')}: {str(e)}")
 
-        # 2. IDENTIFICAZIONE COLONNE PERCENTUALI PER VISUALIZZAZIONE
+        # 2. IDENTIFICAZIONE COLONNE PERCENTUALI
         target_perc = ["Est_Max", "Est_Min", "Confidence", "Max_Raggiunto%", "Min_Raggiunto%"]
         found_to_multiply = []
 
@@ -377,10 +388,9 @@ if menu == "Dashboard Portafoglio":
                 try:
                     df_port[col] = pd.to_numeric(df_port[col], errors='coerce') * 100
                     found_to_multiply.append(col)
-                except: 
-                    continue
+                except: continue
 
-        # 3. CONFIGURAZIONE VISIVA (Senza Max Assoluto)
+        # 3. CONFIGURAZIONE VISIVA
         config_visuale = {
             "Ticker": st.column_config.TextColumn("Ticker", width="small"),
             "Prezzo_Carico": st.column_config.NumberColumn("Carico $", format="$ %.2f"),
@@ -388,6 +398,7 @@ if menu == "Dashboard Portafoglio":
             "Min_Raggiunto": st.column_config.NumberColumn("Min $", format="$ %.2f"),
             "Data_Max": st.column_config.TextColumn("Data Max"),
             "Data_Min": st.column_config.TextColumn("Data Min"),
+            "Stato": st.column_config.TextColumn("Stato", width="small"),
         }
         
         for col in found_to_multiply:
@@ -401,19 +412,32 @@ if menu == "Dashboard Portafoglio":
         )
         
         # 4. SALVATAGGIO
-        st.divider()
-        if st.button("💾 Salva aggiornamenti su Database", key="save_portfolio_changes"):
-            try:
-                df_to_save = df_port.copy()
-                for col in found_to_multiply:
-                    df_to_save[col] = df_to_save[col] / 100
-                
-                save_portfolio(df_to_save)
-                st.success("✅ Database sincronizzato correttamente!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Errore durante il salvataggio: {e}")
+        if not titoli_open.empty:
+            st.divider()
+            if st.button("💾 Salva aggiornamenti su Database", key="save_portfolio_changes"):
+                try:
+                    # Carichiamo il portafoglio completo dal DB per non perdere i titoli CLOSE non visualizzati
+                    df_full_db = load_portfolio().copy()
+                    
+                    # Aggiorniamo solo le righe dei titoli OPEN che abbiamo ricalcolato
+                    for index, row in df_port.iterrows():
+                        if row['Stato'] == 'OPEN':
+                            # Troviamo la corrispondenza nel DF originale (non moltiplicato per 100)
+                            # Riportiamo i valori in decimali
+                            for col in found_to_multiply:
+                                df_port.at[index, col] = df_port.at[index, col] / 100
+                            
+                            # Aggiorniamo il database completo
+                            mask = (df_full_db['Ticker'] == row['Ticker']) & (df_full_db['Stato'] == 'OPEN')
+                            for c in df_port.columns:
+                                if c in df_full_db.columns:
+                                    df_full_db.loc[mask, c] = df_port.at[index, c]
 
+                    save_portfolio(df_full_db)
+                    st.success("✅ Database sincronizzato correttamente!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Errore durante il salvataggio: {e}")
 # ==========================================
 # 2. SEZIONE AGGIUNGI TITOLO
 # ==========================================
