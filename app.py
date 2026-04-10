@@ -532,7 +532,8 @@ elif menu == "Analisi V8":
             
             if model is None:
                 st.error("❌ Impossibile caricare il modello Transformer.")
-            elif not os.path.exists("tickers_SP500_2026.csv"):
+            #elif not os.path.exists("tickers_SP500_2026.csv"):
+            elif not os.path.exists("tickers_EU.csv"):
                 st.error("❌ File 'tickers_SP500_2026.csv' non trovato.")
             else:
                 try:
