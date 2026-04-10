@@ -538,7 +538,8 @@ elif menu == "Analisi V8":
             else:
                 try:
                     # 2. Lettura lista ticker dal tuo CSV
-                    t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+                    #t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+                    t_list = pd.read_csv("tickers_EU.csv")['Ticker'].tolist()
                     st.info(f"Analisi avviata su {len(t_list)} titoli... Attendere circa 2-3 minuti.")
                     
                     # 3. Esecuzione Predizione (Usiamo 'cycles' come definito nella tua funzione)
