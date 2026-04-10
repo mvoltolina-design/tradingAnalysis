@@ -499,7 +499,7 @@ elif menu == "Aggiungi Titolo":
                     # Dividi i valori del form per 100 per salvarli come decimali
                     'Est_Max': est_max / 100, 
                     'Est_Min': est_min / 100, 
-                    'Confidence': float(conf) / 100 if conf.replace('.','',1).isdigit() else 0.0
+                    'Confidence': float(conf) if conf.replace('.','',1).isdigit() else 0.0
                 }
                 
                 df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
