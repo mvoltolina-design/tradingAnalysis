@@ -35,8 +35,7 @@ class IrisTransformer(nn.Module):
     def forward(self, x):
         x = self.embedding(x) + self.pos_embedding
         x = self.transformer(x)
-        x = self.fc_out(x[:, -1, :])
-        return self.output_dropout(x)
+        return self.fc_out(x[:, -1, :]) # ELIMINA il dropout qui!
 
 # Ordine esatto delle feature (DNA del Parquet)
 COLS_ORDER = [
@@ -109,7 +108,6 @@ def load_analisi_data():
 
 @st.cache_resource
 def load_v8_model():
-    #path = "transformer_v8_epoch09.pth"
     path = "transformer_v8.1_refine_epoch8.pth"
     if os.path.exists(path):
         m = IrisTransformer(num_layers=4)
@@ -118,49 +116,144 @@ def load_v8_model():
         return m
     return None
 
+#funzioni ereditate da daily predictor v08.08.py che da risultati più ottimistici
+def get_market_data(symbol, vix_data):
+    try:
+        df = yf.download(symbol.replace('.', '-'), period="1y", progress=False, auto_adjust=True)
+        df = clean_columns(df)
+        if len(df) < 250: return None
+
+        # Feature Engineering
+        df['MA21'] = ta.sma(df['Close'], length=21)
+        df['MA50'] = ta.sma(df['Close'], length=50)
+        df['MA200'] = ta.sma(df['Close'], length=200)
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        macd = ta.macd(df['Close'])
+        df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = macd.iloc[:,0], macd.iloc[:,1], macd.iloc[:,2]
+        
+        df['T_open'] = df['Open'].pct_change() * 100
+        df['T_close'] = df['Close'].pct_change() * 100
+        df['T_min'] = df['Low'].pct_change() * 100
+        df['T_max'] = df['High'].pct_change() * 100
+        
+        df['Ratio_MA21'] = df['Close'] / df['MA21']
+        df['Ratio_MA50'] = df['Close'] / df['MA50']
+        df['Ratio_MA200'] = df['Close'] / df['MA200']
+        df['Vol_Ratio'] = df['Volume'] / df['Volume'].rolling(20).mean()
+        df['Is_Quarter_End'] = df.index.is_quarter_end.astype(float)
+        df['Recent_Div'] = 0.0
+        
+        # Unione con VIX
+        df = df.join(vix_data.rename("VIX_Index"), how='left').ffill()
+        
+        # Preparazione ultime 10 righe versione vecchia
+        #df_final = df.dropna().tail(10).copy()
+        #df_final['Lookback_Day'] = np.arange(1, 11).astype(float)
+        
+        # 1. Pulizia e salvataggio in variabile temporanea
+        df_clean = df.dropna()
+        # 2. Controllo dimensionale: se non ho almeno 10 giorni, inutile procedere
+        if len(df_clean) < 10:
+            return None
+        # 3. Estrazione finale e aggiunta colonna temporale
+        df_in = df_clean.tail(10).copy()
+        df_in['Lookback_Day'] = np.arange(1, 11).astype(float)
+        
+        return df_in[COLS_ORDER].values # Restituisce matrice (10, 16)
+    except Exception as e:
+        print(f"Errore su {symbol}: {e}")
+        return None
+#funzioni ereditate da daily predictor v08.08.py che da risultati più ottimistici
+def task_predict(model_path, ticker_list):
+    # Caricamento VIX una sola volta Messo 1y anziché iniziale 1mo che dava risultati più ottimistici
+    try:
+        # Consiglio: '1y' è più sicuro di '1mo' per coprire i buchi nei weekend/festivi
+        vix = yf.download("^VIX", period="1y", progress=False, auto_adjust=True)
+        if isinstance(vix.columns, pd.MultiIndex):
+            vix.columns = vix.columns.get_level_values(0)
+        vix = clean_columns(vix)
+        #new
+        vix_close = vix['Close'].rename("VIX_Index") # Rinomino qui per sicurezza
+        st.write("✅ VIX scaricato con successo.")
+    except Exception as e:
+        st.error(f"❌ Errore critico download VIX: {e}")
+        vix_close = pd.Series(20.0, index=pd.date_range(end=datetime.now(), periods=500), name="VIX_Index")
+
+    model = IrisTransformer()
+    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    model.train() # MC Dropout attivo
+    
+    results = []
+    print(f"Analisi di {len(ticker_list)} titoli in corso...")
+    prog_bar = st.progress(0, text="Inizializzazione...")
+    idx=0
+    for symbol in ticker_list:
+        idx=idx+1
+        prog_bar.progress(idx / len(ticker_list), text=f"Analisi in corso: {symbol}...")
+        features = get_market_data(symbol, vix_close)
+        if features is not None:
+            # Verifica che il blocco sia (10, 16)
+            input_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+            
+            mc_preds = []
+            with torch.no_grad():
+                for _ in range(30):
+                    mc_preds.append(model(input_tensor).numpy())
+            
+            mc_preds = np.array(mc_preds)
+            p_max = np.mean(mc_preds[:,:,3])
+            p_min = np.mean(mc_preds[:,:,2])
+            std_max = np.std(mc_preds[:,:,3])
+            conf = 1 / (1 + std_max)
+            
+            results.append({
+                'Ticker': symbol, 
+                'EVI': conf * p_max, 
+                'P_MAX': p_max, 
+                'P_MIN': p_min, 
+                'CONF': conf
+            })
+    
+    return pd.DataFrame(results).sort_values('EVI', ascending=False)
+
 # --- 3. ENGINE DI PREDIZIONE ---
 def fetch_and_predict(ticker_list, model, cycles):
     st.write("🔍 **DEBUG START**: Inizio scaricamento dati VIX...")
     
-    # 1. Recupero VIX (Benchmark per il modello)
+    # 1. Recupero VIX
     try:
-        vix = yf.download("^VIX", period="1mo", progress=False, auto_adjust=True)
+        # Consiglio: '1y' è più sicuro di '1mo' per coprire i buchi nei weekend/festivi
+        vix = yf.download("^VIX", period="1y", progress=False, auto_adjust=True)
         if isinstance(vix.columns, pd.MultiIndex):
             vix.columns = vix.columns.get_level_values(0)
         vix = clean_columns(vix)
-        vix_close = vix['Close']
+        #new
+        vix_close = vix['Close'].rename("VIX_Index") # Rinomino qui per sicurezza
         st.write("✅ VIX scaricato con successo.")
     except Exception as e:
         st.error(f"❌ Errore critico download VIX: {e}")
-        # Fallback per non bloccare l'intera analisi se il VIX ha problemi temporanei
-        vix_close = pd.Series(20.0, index=pd.date_range(end=datetime.now(), periods=30))
+        vix_close = pd.Series(20.0, index=pd.date_range(end=datetime.now(), periods=500), name="VIX_Index")
 
     results = []
     prog_bar = st.progress(0, text="Inizializzazione...")
     
-    # Per il debug, puoi limitare la lista: debug_list = ticker_list[:10]
     for idx, t in enumerate(ticker_list):
         prog_bar.progress((idx + 1) / len(ticker_list), text=f"Analisi in corso: {t}...")
         
         try:
             # 2. Download Dati Titolo
-            # Gestione ticker con punti (es. BRK.B -> BRK-B)
             tk_fixed = str(t).replace('.', '-')
             df = yf.download(tk_fixed, period="1y", progress=False, auto_adjust=True)
             
-            if df.empty:
-                continue
+            if df.empty: continue
             
-            # Pulizia MultiIndex (Necessaria per le ultime versioni di yfinance)
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
             df = clean_columns(df)
 
-            if len(df) < 250:
-                continue
+            if len(df) < 250: continue
 
-            # 3. Feature Engineering (Punto critico per il KeyError)
-            # Calcoliamo gli indicatori usando pandas_ta
+            # 3. Feature Engineering
             df['MA21'] = ta.sma(df['Close'], length=21)
             df['MA50'] = ta.sma(df['Close'], length=50)
             df['MA200'] = ta.sma(df['Close'], length=200)
@@ -168,12 +261,11 @@ def fetch_and_predict(ticker_list, model, cycles):
             
             macd_df = ta.macd(df['Close'])
             if macd_df is not None and not macd_df.empty:
-                # Usiamo iloc per evitare errori se i nomi delle colonne variano
                 df['MACD'] = macd_df.iloc[:, 0]
                 df['MACD_Signal'] = macd_df.iloc[:, 1]
-                df['MACD_Hist'] = macd_df.iloc[:, 2]
+                df['MACD_Hist'] = macd_df.iloc[:, 2] # Allineato a COLS_ORDER
             else:
-                continue # Salta se il MACD fallisce
+                continue
 
             df['T_open'] = df['Open'].pct_change() * 100
             df['T_close'] = df['Close'].pct_change() * 100
@@ -188,20 +280,18 @@ def fetch_and_predict(ticker_list, model, cycles):
             df['Is_Quarter_End'] = df.index.is_quarter_end.astype(float)
             df['Recent_Div'] = 0.0
             
-            # Allineamento VIX
-            df = df.join(vix_close.rename("VIX_Index"), how='left')
-            df['VIX_Index'] = df['VIX_Index'].ffill().fillna(20.0)
+            # Allineamento VIX: uso la serie rinominata
+            df = df.join(vix_close, how='left')
+            df['VIX_Index'] = df['VIX_Index'].ffill()
 
-            # 4. Preparazione Tensor per il Modello
-            # Dropna rimuove le righe iniziali necessarie alle medie mobili (es. prime 200)
+            # 4. Preparazione Tensor
             df_clean = df.dropna().copy()
-            if len(df_clean) < 10:
-                continue
+            if len(df_clean) < 10: continue
 
             df_in = df_clean.tail(10).copy()
             df_in['Lookback_Day'] = np.arange(1, 11).astype(float)
             
-            # Verifica finale colonne: COLS_ORDER deve corrispondere al DNA del modello
+            # Qui COLS_ORDER userà 'MACD_Hist' che abbiamo appena creato
             input_data = df_in[COLS_ORDER].values
             input_tensor = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0)
 
@@ -209,38 +299,30 @@ def fetch_and_predict(ticker_list, model, cycles):
             mc_preds = []
             with torch.no_grad():
                 for _ in range(cycles):
-                    # Il modello deve essere in model.train() per attivare il Dropout
+                    # Essenziale: model.train() deve essere attivo per il dropout interno
                     pred = model(input_tensor).numpy()
                     mc_preds.append(pred)
             
             mc_preds = np.array(mc_preds)
             
-            # Supponendo che l'output del modello sia [Batch, 4]
-            # dove index 3 = Max, index 2 = Min
+            # Calcolo medie sui 30 cicli
             p_max = np.mean(mc_preds[:, :, 3])
             p_min = np.mean(mc_preds[:, :, 2])
-            
-            # La confidenza è l'inverso della deviazione standard del Max
             std_max = np.std(mc_preds[:, :, 3])
             conf = 1 / (1 + std_max)
             
-            # EVI (Expected Value Index) per il ranking
-            evi = conf * p_max
-            
             results.append({
                 'Ticker': t, 
-                'EVI': evi, 
+                'EVI': conf * p_max, 
                 'P_MAX': p_max, 
                 'P_MIN': p_min, 
                 'CONF': conf
             })
 
         except Exception as e:
-            # Se un ticker fallisce, stampiamo l'errore specifico ma proseguiamo
             st.warning(f"⚠️ Errore su {t}: {e}")
             continue
             
-    # Restituisce il DataFrame finale
     return pd.DataFrame(results)
 
 # --- 4. LOGICA PORTFOLIO ---
@@ -338,43 +420,56 @@ if menu == "Dashboard Portafoglio":
                 if hasattr(val, 'iloc'): val = val.iloc[0]
                 if isinstance(val, tuple): val = val[1]
                 return val
-
+             
             for index, row in df_port.iterrows():
                 if row['Stato'] == 'OPEN':
                     try:
                         ticker = str(row['Ticker']).strip()
-                        start_date = row['Data_Acquisto']
                         
-                        data_yf = yf.download(ticker, start=start_date, progress=False)
+                        # --- MODIFICA CRUCIALE: Start Date + 1 giorno ---
+                        # Trasformiamo la stringa in oggetto datetime e aggiungiamo un giorno
+                        acquisto_dt = pd.to_datetime(row['Data_Acquisto'])
+                        start_date_monitor = (acquisto_dt + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
                         
-                        if not data_yf.empty:
-                            raw_max = data_yf['High'].max()
-                            raw_min = data_yf['Low'].min()
-                            
-                            val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
-                            val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
-                            
-                            idx_max_raw = data_yf['High'].idxmax()
-                            idx_min_raw = data_yf['Low'].idxmin()
-                            
-                            date_max = extract_date(idx_max_raw)
-                            date_min = extract_date(idx_min_raw)
-            
-                            df_port.at[index, 'Max_Raggiunto'] = val_max
-                            df_port.at[index, 'Min_Raggiunto'] = val_min
-                            
-                            try:
-                                df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
-                                df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
-                            except:
-                                df_port.at[index, 'Data_Max'] = str(date_max)[:10]
-                                df_port.at[index, 'Data_Min'] = str(date_min)[:10]
-                            
+                        # Scarichiamo i dati dal giorno successivo all'acquisto in poi
+                        data_yf = yf.download(ticker, start=start_date_monitor, progress=False)
+                        
+                        # Se è stato acquistato OGGI o ieri sera e non ci sono ancora candele "nuove"
+                        # usiamo il prezzo di carico come base neutra
+                        if data_yf.empty:
                             prezzo_carico = float(row['Prezzo_Carico'])
-                            if prezzo_carico > 0:
-                                df_port.at[index, 'Max_Raggiunto%'] = (val_max - prezzo_carico) / prezzo_carico
-                                df_port.at[index, 'Min_Raggiunto%'] = (val_min - prezzo_carico) / prezzo_carico
-            
+                            df_port.at[index, 'Max_Raggiunto'] = prezzo_carico
+                            df_port.at[index, 'Min_Raggiunto'] = prezzo_carico
+                            df_port.at[index, 'Max_Raggiunto%'] = 0.0
+                            df_port.at[index, 'Min_Raggiunto%'] = 0.0
+                            continue # Passa al prossimo titolo
+                        
+                        # --- Se abbiamo dati (siamo al giorno 2 o oltre) ---
+                        raw_max = data_yf['High'].max()
+                        raw_min = data_yf['Low'].min()
+                        
+                        val_max = float(raw_max.iloc[0]) if hasattr(raw_max, 'iloc') else float(raw_max)
+                        val_min = float(raw_min.iloc[0]) if hasattr(raw_min, 'iloc') else float(raw_min)
+                        
+                        # Aggiornamento valori nel DataFrame
+                        df_port.at[index, 'Max_Raggiunto'] = val_max
+                        df_port.at[index, 'Min_Raggiunto'] = val_min
+                        
+                        # Calcolo percentuali rispetto al carico
+                        prezzo_carico = float(row['Prezzo_Carico'])
+                        if prezzo_carico > 0:
+                            df_port.at[index, 'Max_Raggiunto%'] = (val_max - prezzo_carico) / prezzo_carico
+                            df_port.at[index, 'Min_Raggiunto%'] = (val_min - prezzo_carico) / prezzo_carico
+
+                        # Aggiornamento Date Massimi/Minimi
+                        idx_max_raw = data_yf['High'].idxmax()
+                        idx_min_raw = data_yf['Low'].idxmin()
+                        date_max = extract_date(idx_max_raw)
+                        date_min = extract_date(idx_min_raw)
+                        
+                        df_port.at[index, 'Data_Max'] = date_max.strftime('%Y-%m-%d')
+                        df_port.at[index, 'Data_Min'] = date_min.strftime('%Y-%m-%d')
+
                     except Exception as e:
                         st.warning(f"⚠️ Errore aggiornamento {row.get('Ticker', 'N/D')}: {str(e)}")
 
@@ -448,20 +543,24 @@ elif menu == "Aggiungi Titolo":
     t_in = st.text_input("Ticker (es. AAPL):").upper().strip()
     
     if t_in:
-        # --- 1. RECUPERO PREZZO LIVE ---
-        current_market_price = 0.01
-        try:
-            ticker_yf = yf.Ticker(t_in)
-            hist = ticker_yf.history(period="1d")
-            if not hist.empty:
-                current_market_price = float(hist['Close'].iloc[-1])
-                st.caption(f"📈 Ultimo prezzo di mercato rilevato: **{current_market_price:.2f} $**")
-        except Exception as e:
-            st.error(f"Errore yfinance: {e}")
+        # --- 1. GESTIONE PREZZO CON SESSION STATE ---
+        # Se cambiamo ticker o il prezzo non esiste, lo inizializziamo
+        if "last_ticker" not in st.session_state or st.session_state.last_ticker != t_in:
+            st.session_state.last_ticker = t_in
+            try:
+                ticker_yf = yf.Ticker(t_in)
+                hist = ticker_yf.history(period="1d")
+                if not hist.empty:
+                    st.session_state.market_price = float(hist['Close'].iloc[-1])
+                else:
+                    st.session_state.market_price = 0.00
+            except:
+                st.session_state.market_price = 0.00
+
+        st.caption(f"📈 Ultimo prezzo di mercato rilevato: **{st.session_state.market_price:.2f} $**")
 
         # --- 2. CONTROLLO DATI ANALISI V8 ---
         match = df_analisi[df_analisi['Ticker'] == t_in] if 'Ticker' in df_analisi.columns else pd.DataFrame()
-        
         default_max, default_min, default_conf = 0.0, 0.0, "N/D"
         
         if not match.empty:
@@ -473,7 +572,8 @@ elif menu == "Aggiungi Titolo":
         # --- 3. FORM DI INSERIMENTO ---
         with st.form("form_aggiunta"):
             c1, c2 = st.columns(2)
-            entry_price = c1.number_input("Prezzo di Carico ($)", min_value=0.0, value=current_market_price, format="%.2f")
+            # USIAMO il valore salvato nel session_state, così non cambia durante il submit
+            entry_price = c1.number_input("Prezzo di Carico ($)", min_value=0.0, value=st.session_state.market_price, format="%.2f")
             
             st.divider()
             st.subheader("Target di Analisi")
@@ -483,29 +583,25 @@ elif menu == "Aggiungi Titolo":
             conf = col_c.text_input("Confidence Score", value=default_conf)
             
             if st.form_submit_button("Conferma Acquisto"):
-                df_p = load_portfolio() 
-                
-                # Applichiamo la divisione per 100 ai valori inseriti nel form
-                # prima di creare il dizionario della nuova riga
+                # ... (resto del tuo codice di salvataggio identico)
+                df_p = load_portfolio()
                 new_row = {
                     'Ticker': t_in,
                     'Data_Acquisto': datetime.now().strftime("%Y-%m-%d"),
-                    'Prezzo_Carico': entry_price,
+                    'Prezzo_Carico': entry_price, # Ora prenderà il valore corretto del widget
                     'Max_Raggiunto': entry_price, 
                     'Max_Raggiunto%': 0.0,
                     'Min_Raggiunto': entry_price,
                     'Min_Raggiunto%': 0.0,
                     'Stato': 'OPEN',
-                    # Dividi i valori del form per 100 per salvarli come decimali
                     'Est_Max': est_max / 100, 
                     'Est_Min': est_min / 100, 
                     'Confidence': float(conf) if conf.replace('.','',1).isdigit() else 0.0
                 }
-                
                 df_p = pd.concat([df_p, pd.DataFrame([new_row])], ignore_index=True)
                 save_portfolio(df_p)
                 st.balloons()
-                st.success(f"Posizione su {t_in} salvata con target decimalizzati!")
+                st.success(f"Posizione su {t_in} salvata!")
 
 # ==========================================
 # 3. SEZIONE ANALISI V8
@@ -527,40 +623,49 @@ elif menu == "Analisi V8":
     # Pulsante di attivazione
     if st.button("🚀 AVVIA ANALISI S&P 500", key="run_analysis_v8"):
         with st.spinner("Caricamento modello e scaricamento dati S&P 500..."):
-            # 1. Caricamento Modello
-            model = load_v8_model()
             
-            if model is None:
-                st.error("❌ Impossibile caricare il modello Transformer.")
-            elif not os.path.exists("tickers_SP500_2026.csv"):
-            #elif not os.path.exists("tickers_EU.csv"):
-                st.error("❌ File 'tickers_SP500_2026.csv' non trovato.")
-            else:
+            #modello tratto da analisi dailyPredictor V08.08.py
+            tickers = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+            st.info(f"Analisi avviata su {len(tickers)} titoli... Attendere circa 2-3 minuti.")
+            res = task_predict("transformer_v8.1_refine_epoch8.pth", tickers)
+            #
+            
+            ## 1. Caricamento Modello
+            #model = load_v8_model()
+            
+            
+            #if model is None:
+            #    st.error("❌ Impossibile caricare il modello Transformer.")
+            #elif not os.path.exists("tickers_SP500_2026.csv"):
+            ##elif not os.path.exists("tickers_EU.csv"):
+            #    st.error("❌ File 'tickers_SP500_2026.csv' non trovato.")
+            #else:
+            #    try:
+            #        # 2. Lettura lista ticker dal tuo CSV
+            #        t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
+            #        #t_list = pd.read_csv("tickers_EU.csv")['Ticker'].tolist()
+            #        st.info(f"Analisi avviata su {len(t_list)} titoli... Attendere circa 2-3 minuti.")
+            #        
+            #        # 3. Esecuzione Predizione (Usiamo 'cycles' come definito nella tua funzione)
+            #        res = fetch_and_predict(t_list, model, cycles=30)
+                    
+            if not res.empty:
+                # Ordiniamo i risultati
+                res_sorted = res.sort_values('EVI', ascending=False)
+                
+                # 4. Salvataggio su Google Sheets nel worksheet 'candidati'
                 try:
-                    # 2. Lettura lista ticker dal tuo CSV
-                    t_list = pd.read_csv("tickers_SP500_2026.csv")['Ticker'].tolist()
-                    #t_list = pd.read_csv("tickers_EU.csv")['Ticker'].tolist()
-                    st.info(f"Analisi avviata su {len(t_list)} titoli... Attendere circa 2-3 minuti.")
+                    conn = get_gsheet_connection()
+                    conn.update(worksheet="candidati", data=res_sorted)
                     
-                    # 3. Esecuzione Predizione (Usiamo 'cycles' come definito nella tua funzione)
-                    res = fetch_and_predict(t_list, model, cycles=30)
-                    
-                    if not res.empty:
-                        # Ordiniamo i risultati
-                        res_sorted = res.sort_values('EVI', ascending=False)
+                    st.success("✅ Analisi completata e salvata su Google Sheets!")
+                    st.cache_data.clear() # Fondamentale per vedere i nuovi dati
+                    st.rerun() 
+                except Exception as ge:
+                    st.error(f"❌ Errore durante il salvataggio su GSheet: {ge}")
+            else:
+                st.error("❌ L'analisi non ha prodotto risultati. Verifica i log o la connessione yfinance.")
                         
-                        # 4. Salvataggio su Google Sheets nel worksheet 'candidati'
-                        try:
-                            conn = get_gsheet_connection()
-                            conn.update(worksheet="candidati", data=res_sorted)
-                            
-                            st.success("✅ Analisi completata e salvata su Google Sheets!")
-                            st.cache_data.clear() # Fondamentale per vedere i nuovi dati
-                            st.rerun() 
-                        except Exception as ge:
-                            st.error(f"❌ Errore durante il salvataggio su GSheet: {ge}")
-                    else:
-                        st.error("❌ L'analisi non ha prodotto risultati. Verifica i log o la connessione yfinance.")
-                        
-                except Exception as e:
-                    st.error(f"❌ Errore critico durante l'analisi: {str(e)}")
+                #except Exception as e:
+                #    st.error(f"❌ Errore critico durante l'analisi: {str(e)}")
+              
