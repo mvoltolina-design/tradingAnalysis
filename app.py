@@ -17,7 +17,7 @@ COLONNE_PORTAFOGLIO = [
 ]
 # --- 1. CONFIGURAZIONE E ARCHITETTURA MODELLO ---
 class IrisTransformer(nn.Module):
-    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
+    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.1):
         super().__init__()
         self.embedding = nn.Linear(input_dim, d_model)
         self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
@@ -42,7 +42,7 @@ class IrisTransformer(nn.Module):
 COLS_ORDER = [
     'Lookback_Day', 'T_close', 'T_open', 'T_min', 'T_max', 
     'Ratio_MA21', 'Ratio_MA50', 'Ratio_MA200', 'RSI', 
-    'MACD', 'MACD_Signal', 'MACD_Hi', 'Vol_Ratio', 
+    'MACD', 'MACD_Signal', 'MACD_Hist', 'Vol_Ratio', 
     'Is_Quarter_End', 'Recent_Div', 'VIX_Index'
 ]
 
@@ -171,7 +171,7 @@ def fetch_and_predict(ticker_list, model, cycles):
                 # Usiamo iloc per evitare errori se i nomi delle colonne variano
                 df['MACD'] = macd_df.iloc[:, 0]
                 df['MACD_Signal'] = macd_df.iloc[:, 1]
-                df['MACD_Hi'] = macd_df.iloc[:, 2]
+                df['MACD_Hist'] = macd_df.iloc[:, 2]
             else:
                 continue # Salta se il MACD fallisce
 
