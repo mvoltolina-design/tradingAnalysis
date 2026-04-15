@@ -150,7 +150,7 @@ def task_predict(model_path, ticker_list):
             input_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
             mc_preds = []
             with torch.no_grad():
-                for _ in range(50):
+                for _ in range(20):
                     mc_preds.append(model(input_tensor).numpy())
             
             mc_preds = np.array(mc_preds)
