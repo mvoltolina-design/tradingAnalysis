@@ -26,7 +26,7 @@ COLS_ORDER = [
 
 # --- 1. ARCHITETTURA MODELLO ---
 class IrisTransformer(nn.Module):
-    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.1):
+    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
         super().__init__()
         self.embedding = nn.Linear(input_dim, d_model)
         self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
@@ -150,7 +150,7 @@ def task_predict(model_path, ticker_list):
             input_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
             mc_preds = []
             with torch.no_grad():
-                for _ in range(30):
+                for _ in range(50):
                     mc_preds.append(model(input_tensor).numpy())
             
             mc_preds = np.array(mc_preds)
