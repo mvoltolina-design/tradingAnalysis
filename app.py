@@ -35,27 +35,25 @@ COLS_ORDER = [
 # 1. ARCHITETTURA MODELLO
 # ==============================================================================
 class IrisTransformer(nn.Module):
-    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=DROPOUT_RATE):
+    def __init__(self, input_dim=16, d_model=256, nhead=8, num_layers=4, dropout=0.2):
         super().__init__()
         self.embedding = nn.Linear(input_dim, d_model)
         self.pos_embedding = nn.Parameter(torch.zeros(1, 10, d_model))
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, nhead=nhead, batch_first=True,
-            norm_first=True, dropout=dropout
+            d_model=d_model, nhead=nhead, batch_first=True, norm_first=True, dropout=dropout
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.fc_out = nn.Sequential(
-            nn.Linear(d_model, d_model // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            nn.Linear(d_model, d_model // 2), 
+            nn.ReLU(), 
             nn.Linear(d_model // 2, 4)
         )
+        self.output_dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         x = self.embedding(x) + self.pos_embedding
         x = self.transformer(x)
-        return self.fc_out(x[:, -1, :])
-
+        return self.fc_out(x[:, -1, :]) # ELIMINA il dropout qui!
 
 # ==============================================================================
 # 2. FUNZIONI DI UTILITÀ GENERALI
