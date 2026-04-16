@@ -13,7 +13,7 @@ from streamlit_gsheets import GSheetsConnection
 # CONFIGURAZIONE GLOBALE
 # ==============================================================================
 MC_CYCLES = 20          # Cicli Monte Carlo (ridotti da 30 per velocità)
-DROPOUT_RATE = 0.1      # Dropout per MC Uncertainty
+DROPOUT_RATE = 0.2      # Dropout per MC Uncertainty
 COMMISSION_DEFAULT = 0.0019   # 0.19% default commissione broker
 TAX_RATE_IT = 0.26      # 26% tassa sul capital gain (Italia)
 
