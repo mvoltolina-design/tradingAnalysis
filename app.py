@@ -240,42 +240,57 @@ def mc_predict(model, input_tensor, cycles=MC_CYCLES):
     return p_max, p_min, conf, evi
 
 
-def task_predict(ticker_list): # Rimosso model_path perché usiamo load_v8_model
-    """Analisi batch di tutti i ticker S&P500."""
-    vix_data = get_vix_data()
-    st.write("✅ VIX caricato.")
+def task_predict(model_path, ticker_list):
+    # Caricamento VIX una sola volta Messo 1y anziché iniziale 1mo che dava risultati più ottimistici
+    try:
+        # Consiglio: '1y' è più sicuro di '1mo' per coprire i buchi nei weekend/festivi
+        vix = yf.download("^VIX", period="1y", progress=False, auto_adjust=True)
+        if isinstance(vix.columns, pd.MultiIndex):
+            vix.columns = vix.columns.get_level_values(0)
+        vix = clean_columns(vix)
+        #new
+        vix_close = vix['Close'].rename("VIX_Index") # Rinomino qui per sicurezza
+        st.write("✅ VIX scaricato con successo.")
+    except Exception as e:
+        st.error(f"❌ Errore critico download VIX: {e}")
+        vix_close = pd.Series(20.0, index=pd.date_range(end=datetime.now(), periods=500), name="VIX_Index")
 
-    # Usiamo la funzione cacheata per evitare errori di dimensione pesi
-    model = load_v8_model()
+    model = IrisTransformer()
+    model.load_state_dict(torch.load(model_path, map_location="cpu"))
+    model.train() # MC Dropout attivo
     
-    if model is None:
-        st.error("❌ Impossibile caricare il modello transformer_v8.1_refine_epoch8.pth")
-        return pd.DataFrame()
-
     results = []
+    print(f"Analisi di {len(ticker_list)} titoli in corso...")
     prog_bar = st.progress(0, text="Inizializzazione...")
-
-    for idx, symbol in enumerate(ticker_list):
-        prog_bar.progress((idx + 1) / len(ticker_list), text=f"Analisi: {symbol}...")
-        features = get_market_data(symbol, vix_data)
-        
+    idx=0
+    for symbol in ticker_list:
+        idx=idx+1
+        prog_bar.progress(idx / len(ticker_list), text=f"Analisi in corso: {symbol}...")
+        features = get_market_data(symbol, vix_close)
         if features is not None:
-            # Assicurati che il tensore sia (Batch, Seq_Len, Features) -> (1, 10, 16)
-            tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+            # Verifica che il blocco sia (10, 16)
+            input_tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
             
-            # Esegui MC Dropout
-            p_max, p_min, conf, evi = mc_predict(model, tensor)
+            mc_preds = []
+            with torch.no_grad():
+                for _ in range(20):
+                    mc_preds.append(model(input_tensor).numpy())
+            
+            mc_preds = np.array(mc_preds)
+            p_max = np.mean(mc_preds[:,:,3])
+            p_min = np.mean(mc_preds[:,:,2])
+            std_max = np.std(mc_preds[:,:,3])
+            conf = 1 / (1 + std_max)
             
             results.append({
-                'Ticker': symbol,
-                'EVI': evi,
-                'P_MAX': p_max,
-                'P_MIN': p_min,
+                'Ticker': symbol, 
+                'EVI': conf * p_max, 
+                'P_MAX': p_max, 
+                'P_MIN': p_min, 
                 'CONF': conf
             })
-
+    
     return pd.DataFrame(results).sort_values('EVI', ascending=False)
-
 # ==============================================================================
 # 6. LOGICA PORTAFOGLIO — AGGIORNAMENTO METRICHE
 # ==============================================================================
