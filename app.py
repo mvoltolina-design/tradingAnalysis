@@ -242,14 +242,17 @@ def mc_predict(model, input_tensor, cycles=MC_CYCLES):
     return p_max, p_min, conf, evi
 
 
-def task_predict(model_path, ticker_list):
+def task_predict(ticker_list): # Rimosso model_path perché usiamo load_v8_model
     """Analisi batch di tutti i ticker S&P500."""
     vix_data = get_vix_data()
     st.write("✅ VIX caricato.")
 
-    model = IrisTransformer(dropout=DROPOUT_RATE)
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
-    model.train()
+    # Usiamo la funzione cacheata per evitare errori di dimensione pesi
+    model = load_v8_model()
+    
+    if model is None:
+        st.error("❌ Impossibile caricare il modello transformer_v8.1_refine_epoch8.pth")
+        return pd.DataFrame()
 
     results = []
     prog_bar = st.progress(0, text="Inizializzazione...")
@@ -257,9 +260,14 @@ def task_predict(model_path, ticker_list):
     for idx, symbol in enumerate(ticker_list):
         prog_bar.progress((idx + 1) / len(ticker_list), text=f"Analisi: {symbol}...")
         features = get_market_data(symbol, vix_data)
+        
         if features is not None:
+            # Assicurati che il tensore sia (Batch, Seq_Len, Features) -> (1, 10, 16)
             tensor = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+            
+            # Esegui MC Dropout
             p_max, p_min, conf, evi = mc_predict(model, tensor)
+            
             results.append({
                 'Ticker': symbol,
                 'EVI': evi,
@@ -269,7 +277,6 @@ def task_predict(model_path, ticker_list):
             })
 
     return pd.DataFrame(results).sort_values('EVI', ascending=False)
-
 
 # ==============================================================================
 # 6. LOGICA PORTAFOGLIO — AGGIORNAMENTO METRICHE
