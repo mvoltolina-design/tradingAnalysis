@@ -525,10 +525,17 @@ if menu == "📊 Dashboard Portafoglio":
     open_mask = df_port['Stato'] == 'OPEN'
     open_tickers = df_port.loc[open_mask, 'Ticker'].tolist()
 
-    # --- Aggiornamento metriche ---
+    # --- Aggiornamento metriche: calcola e salva in session_state ---
     if aggiorna and open_tickers:
-        with st.spinner("Aggiornamento metriche in corso..."):
-            df_port = compute_portfolio_metrics(df_port)
+        with st.spinner("Aggiornamento metriche Max/Min in corso..."):
+            df_updated = compute_portfolio_metrics(df_port)
+        st.session_state['updated_port'] = df_updated
+        st.session_state['port_updated_flag'] = True
+
+    # Se abbiamo dati aggiornati in session_state, usiamo quelli per il display
+    if 'updated_port' in st.session_state:
+        df_port = st.session_state['updated_port']
+        open_mask = df_port['Stato'] == 'OPEN'
 
     # --- Recupero prezzi correnti per indicatori intraday ---
     current_prices = {}
@@ -643,20 +650,25 @@ if menu == "📊 Dashboard Portafoglio":
 
     st.dataframe(df_display, use_container_width=True, hide_index=True, column_config=col_cfg)
 
-    # --- SALVA ---
-    if aggiorna and open_tickers:
+    # --- SALVA su Google Sheets (usa session_state per persistere tra rerun) ---
+    if st.session_state.get('port_updated_flag', False):
         st.divider()
+        st.info("📝 Dati Max/Min aggiornati. Clicca per salvare su Google Sheets.")
         if st.button("💾 Salva aggiornamenti su Google Sheets"):
             try:
                 df_full = load_portfolio().copy()
-                for _, row in df_port[open_mask].iterrows():
+                df_updated = st.session_state['updated_port']
+                for _, row in df_updated[df_updated['Stato'] == 'OPEN'].iterrows():
                     mask = (df_full['Ticker'] == row['Ticker']) & (df_full['Stato'] == 'OPEN')
                     for c in ['Max_Raggiunto', 'Max_Raggiunto%', 'Min_Raggiunto',
                               'Min_Raggiunto%', 'Data_Max', 'Data_Min']:
-                        if c in df_port.columns and c in df_full.columns:
-                            df_full.loc[mask, c] = row.get(c)
+                        if c in df_updated.columns and c in df_full.columns:
+                            df_full.loc[mask, c] = row[c]
                 save_portfolio(df_full)
-                st.success("✅ Aggiornamento salvato!")
+                # Pulizia session state dopo salvataggio riuscito
+                del st.session_state['updated_port']
+                del st.session_state['port_updated_flag']
+                st.success("✅ Aggiornamento salvato su Google Sheets!")
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Errore salvataggio: {e}")
